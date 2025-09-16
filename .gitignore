@@ -1,0 +1,5 @@
+data/Das_forced_photometry_files
+data/ztf_snii_lcs_WISE
+*.python-version
+*.DS_Store
+
