@@ -465,7 +465,7 @@ def convert_ZTF_mag_mJy(res, forced=False):
 ## ---------- WISE LIGHT CURVE DATA PARSING AND PLOTTING --------------- ##
 ###########################################################################
 
-def subtract_wise_parity_baseline(wise_res_dict, dt=50):
+def subtract_wise_parity_baseline(wise_resdict, dt=50):
     """
     Subtract separate baselines for even/odd WISE epochs to account
     for scan-orientation systematics. Also clips negative/zero fluxes
@@ -473,7 +473,7 @@ def subtract_wise_parity_baseline(wise_res_dict, dt=50):
 
     Parameters
     ----------
-    wise_res_dict : dict
+    wise_resdict : dict
         Dictionary with keys like 'b1_times', 'b1_fluxes', etc.
     dt : float
         Days before the peak to compute baseline.
@@ -484,9 +484,9 @@ def subtract_wise_parity_baseline(wise_res_dict, dt=50):
         Copy of input dictionary with corrected fluxes and stored baselines.
     """
 
-    if wise_res_dict == {}:
+    if wise_resdict == {}:
         return {}
-    w = wise_res_dict.copy()
+    w = wise_resdict.copy()
 
     for band in ["b1", "b2"]:
         times = np.array(w[f"{band}_times"])
