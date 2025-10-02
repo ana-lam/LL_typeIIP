@@ -39,7 +39,7 @@ Irsa._session.auth = HTTPBasicAuth(username, password)
 # Color config for filters
 colors = {1: "green", 2: "red", 3: "orange"}
 labels = {1: 'g', 2: 'r', 3: 'i'}
-markers = {1: 'o', 2: 's', 3: 'D'}
+markers = {1: 'o', 2: 'X', 3: 'D'}
 sizes = {1: 30, 2: 60, 3: 90}
 
 def query_all_detections(oid, client, page_size=10000):
@@ -254,7 +254,7 @@ def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=T
         created_ax = True
 
     colors = {"ZTF_g":"green","ZTF_r":"red","ZTF_i":"orange"}
-    markers = {"ZTF_g":"o","ZTF_r":"s","ZTF_i":"D"}
+    markers = {"ZTF_g":"o","ZTF_r":"X","ZTF_i":"D"}
 
     all_mjd = []
     all_y = []
@@ -690,7 +690,8 @@ def get_wise_lc_data(oid):
                'b2_times': b2_times, 'b2_fluxes': b2_fluxes, 'b2_fluxerrs': b2_fluxerrs}
     return resdict
 
-def plot_wise_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, subtract_parity_baseline=False, baseline_dt=200, show_baselines=False):
+def plot_wise_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, subtract_parity_baseline=False, 
+                 baseline_dt=200, show_baselines=False, clip_negatives=False):
 
     created_ax = False
     if ax is None:
@@ -701,7 +702,7 @@ def plot_wise_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=Tru
     markers = {1:"s",2:"s"}
 
     if subtract_parity_baseline:
-        resdict = subtract_wise_parity_baseline(resdict, dt=baseline_dt)
+        resdict = subtract_wise_parity_baseline(resdict, dt=baseline_dt, clip_negatives=clip_negatives)
         for fid, data in zip([1,2], [("b1_times","b1_fluxes","b1_fluxerrs"), ("b2_times","b2_fluxes","b2_fluxerrs")]):
             color = colors.get(fid,"black")
 
@@ -805,66 +806,9 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
     # x-axis range
     xlim=(ztf_resdict["lc_det"].mjd.min(), ztf_resdict["lc_det"].mjd.max())
     min_mjd = xlim[0] - 30 if xlim[0] is not None else None
-    max_mjd = xlim[1] + 400 if xlim[1] is not None else None
+    max_mjd = xlim[1] + 200 if xlim[1] is not None else None
 
     w = wise_resdict.copy()
-
-    if scale_wise:
-
-        if baseline_ref == "ztf":
-            # --- Find ZTF reference-band peak ---
-            ztf_forced = ztf_resdict["forced"]
-            print("Calculating ZTF peak time")
-            t_peak = None
-            band_key = f"ZTF_{ref_band}"
-            if band_key in ztf_forced:
-                band_data = ztf_forced[band_key]
-                if "mag" in band_data:
-                    mags = np.array(band_data["mag"])
-                    times = np.array(band_data["mjd"])
-                    mask_ref = np.isfinite(mags)
-                    if np.any(mask_ref):
-                        t_peak = times[np.nanargmin(mags[mask_ref])]
-
-            # --- Subtract baseline before (t_peak - baseline_dt) ---
-            if t_peak is not None:
-                mask_b1 = w["b1_times"] < (t_peak - baseline_dt)
-                if np.any(mask_b1):
-                    b1_base = np.nanmedian(w["b1_fluxes"][mask_b1])
-                    w["b1_fluxes"] = w["b1_fluxes"] - b1_base
-                    print(f"W1 baseline (before {t_peak-baseline_dt:.1f}) = {b1_base:.4f} mJy")
-
-                mask_b2 = w["b2_times"] < (t_peak - baseline_dt)
-                if np.any(mask_b2):
-                    b2_base = np.nanmedian(w["b2_fluxes"][mask_b2])
-                    w["b2_fluxes"] = w["b2_fluxes"] - b2_base
-                    print(f"W2 baseline (before {t_peak-baseline_dt:.1f}) = {b2_base:.4f} mJy")
-
-        elif baseline_ref == "wise":
-            print("Calculating WISE peaks")
-            # --- W1 ---
-            if np.any(np.isfinite(w["b1_fluxes"])):
-                b1_peak_idx = np.nanargmax(w["b1_fluxes"])
-                t_peak_b1 = w["b1_times"][b1_peak_idx]
-                mask_b1 = w["b1_times"] < (t_peak_b1 - baseline_dt)
-                if np.any(mask_b1):
-                    b1_base = np.nanmedian(w["b1_fluxes"][mask_b1])
-                    w["b1_fluxes"] = w["b1_fluxes"] - b1_base
-                    print(f"W1 baseline (before {t_peak_b1:.1f}-{baseline_dt:.1f}) = {b1_base:.4f} mJy")
-
-            # --- W2 ---
-            if np.any(np.isfinite(w["b2_fluxes"])):
-                b2_peak_idx = np.nanargmax(w["b2_fluxes"])
-                t_peak_b2 = w["b2_times"][b2_peak_idx]
-                mask_b2 = w["b2_times"] < (t_peak_b2 - baseline_dt)
-                if np.any(mask_b2):
-                    b2_base = np.nanmedian(w["b2_fluxes"][mask_b2])
-                    w["b2_fluxes"] = w["b2_fluxes"] - b2_base
-                    print(f"W2 baseline (before {t_peak_b2:.1f}-{baseline_dt:.1f})= {b2_base:.4f} mJy")
-        
-        elif baseline_ref == "wise_parity":
-            print("Subtracting WISE parity baselines")
-            w = subtract_wise_parity_baseline(w, dt=baseline_dt)
 
     if mode == "stacked":
         # ---------------------------
@@ -913,7 +857,7 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 w["b1_fluxes"], w["b1_fluxerrs"] = log_safe(w["b1_fluxes"], w["b1_fluxerrs"])
                 w["b2_fluxes"], w["b2_fluxerrs"] = log_safe(w["b2_fluxes"], w["b2_fluxerrs"])
 
-            plot_wise_lc(w if scale_wise else wise_resdict, oid=ztf_resdict['oid'], xlim=(min_mjd, max_mjd), ax=ax2, show=False)
+            plot_wise_lc(wise_resdict, oid=ztf_resdict['oid'], subtract_parity_baseline=scale_wise, xlim=(min_mjd, max_mjd), ax=ax2, show=False)
             ax2.set_ylabel("WISE flux scaled (mJy)" if scale_wise else "WISE flux (mJy)", fontsize=14)
             ax2.grid(True, alpha=0.4)
             ax2.set_xlabel("MJD", fontsize=14)
@@ -993,7 +937,7 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 w["b1_fluxes"], w["b1_fluxerrs"] = log_safe(w["b1_fluxes"], w["b1_fluxerrs"])
                 w["b2_fluxes"], w["b2_fluxerrs"] = log_safe(w["b2_fluxes"], w["b2_fluxerrs"])
 
-            plot_wise_lc(w if scale_wise else wise_resdict, oid=ztf_resdict['oid'], xlim=(min_mjd, max_mjd), ax=ax, clip_negatives=True, show=False)
+            plot_wise_lc(wise_resdict, oid=ztf_resdict['oid'], subtract_parity_baseline=scale_wise, xlim=(min_mjd, max_mjd), ax=ax, clip_negatives=True, show=False)
 
 
         # change style for overlay
