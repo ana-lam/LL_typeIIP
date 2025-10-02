@@ -295,7 +295,7 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
 
 # --------- plotter ----------
 def plot_sed(sed, y_mode = "Fnu", logy=False, logx=False, title_prefix="SED", 
-             secax=False):
+             secax=False, savepath=None):
     """
     y_mode='Fnu'  -> Fnu vs nu (mJy, Hz)
     y_mode='Flam' -> Flam vs λ (cgs/Å, Å)
@@ -382,5 +382,11 @@ def plot_sed(sed, y_mode = "Fnu", logy=False, logx=False, title_prefix="SED",
     if H:
         ax.legend(H, L, fontsize=9)
     
+    
     plt.tight_layout()
-    plt.show()
+
+    if savepath:
+            plt.savefig(savepath, format="pdf", bbox_inches="tight")
+            print(f"Saved plot to {savepath}")
+    else:
+        plt.show()
