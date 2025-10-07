@@ -806,7 +806,7 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
     # x-axis range
     xlim=(ztf_resdict["lc_det"].mjd.min(), ztf_resdict["lc_det"].mjd.max())
     min_mjd = xlim[0] - 30 if xlim[0] is not None else None
-    max_mjd = xlim[1] + 200 if xlim[1] is not None else None
+    max_mjd = xlim[1] + 100 if xlim[1] is not None else None
 
     w = wise_resdict.copy()
 
