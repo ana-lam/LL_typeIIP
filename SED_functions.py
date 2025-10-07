@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from astropy import units as u
 import astropy.constants as const
 from lc_plotting_functions import subtract_wise_parity_baseline
+import pandas as pd
 
 # effective wavelengths [Angstrom]
 lam_eff = {
@@ -67,7 +68,7 @@ def _nearest_ul(time_mjd, err_mJy, mjd0, max_dt, n_sigma=3):
         return (time_mjd[k], n_sigma*err_mJy[k])
     return None
 
-def _sed_has_required_detections(sed):
+def _sed_has_required_detections(sed, require_wise_detetection=True):
     """
     Keep only SEDs that have at least one *detection* (not UL) in any ZTF band
     AND at least one *detection* in any WISE band.
@@ -87,8 +88,125 @@ def _sed_has_required_detections(sed):
     # drop SEDs with no detections at all (i.e., only ULs)
     any_detection = np.any(det)
 
-    return any_detection and any_ztf_det and any_wise_det
+    if require_wise_detetection:
+        return any_detection and any_ztf_det and any_wise_det
+    else:
+        return any_detection and any_ztf_det
 
+# --- Build SEDs after tail-onset using tail start from CSV -----
+def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0, 
+                                     max_dt_wise=5.0, include_limits=True, snr_min=SNR_MIN,
+                                     snr_min_wise=SNR_MIN_WISE, csv_path="data/TableA_full_machine_readable_params.csv",
+                                     tail_offset_days=0.0, merge_dt=1.0, require_wise_detection=False,
+                                     min_detected_bands=2, include_plateau_epoch=True):
+    """
+    Build SEDs for any epochs **after plateau end** that have >= `min_detected_bands`
+    detections (regardless of whether they are ZTF or WISE).
+
+    Returns
+    -------
+    list of SED dicts (same schema as build_sed)
+    """
+
+    # Because we loop over WISE detections, we can yield the same epoch so let's dedup
+    def _merge_epochs(times, merge_dt=1.0):
+        """
+        Merge epochs that are within merge_dt days of each other.
+        """
+
+        if len(times) == 0:
+            return np.array([])
+        times = np.sort(times)
+        groups = [[times[0]]]
+        for x in times[1:]:
+            if x - groups[-1][-1] <= merge_dt:
+                groups[-1].append(x)
+            else:
+                groups.append([x])
+
+        reps = [np.median(g) for g in groups]
+
+        return np.array(reps)
+    
+    def _det_times(times, fluxes, errs, snr_threshold):
+        """
+        Find detection times based on SNR threshold.
+        """
+        t = np.asarray(times, float)
+        f = np.asarray(fluxes, float)
+        e = np.asarray(errs, float)
+        ok = np.isfinite(t) & np.isfinite(f) & np.isfinite(e) & (e > 0) & (f > 0) & ((f / e) >= snr_threshold)
+        
+        return t[ok]
+
+    oid = ztf_resdict.get("oid")
+    ztf_forced = ztf_resdict['forced']
+
+    params_df = pd.read_csv(csv_path)
+    m = params_df[['name', 'plateauend', 'tailstart']].dropna()
+    m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float))) # use plateau end for tail start
+
+    if oid not in m_dict or not np.isfinite(m_dict[oid]):
+        return []
+    t_tail = float(m_dict[oid]) + float(tail_offset_days) # shift tail start time/plateau end time
+
+    # ---- candidate epochs from ZTF -----
+    if include_plateau_epoch:
+        # include plateau end epoch as well
+        all_epochs = np.array([t_tail])
+    
+    ztf_det_times = []
+
+    for band in ["ZTF_g","ZTF_r","ZTF_i"]:
+        if band in ztf_forced:
+            d = ztf_forced[band]
+            t_band = _det_times(d["mjd"], d["flux_mJy"], d["flux_err_mJy"], snr_min)
+            ztf_det_times.append(t_band[t_band > t_tail])
+
+    ztf_det_times = [np.asarray(a, float) for a in ztf_det_times if a is not None and len(a) > 0]
+    ztf_det_times = np.unique(np.concatenate(ztf_det_times)) if ztf_det_times else np.array([])
+
+    all_epochs = _merge_epochs(ztf_det_times, merge_dt=merge_dt)
+
+    # ---- candidate epochs from WISE ----
+    wise_det_times = []
+
+    w = subtract_wise_parity_baseline(
+        wise_resdict, clip_negatives=False, dt=200.0,
+        rescale_uncertainties=True, sigma_clip=3.0
+    )
+
+
+    w1_t = _det_times(w.get("b1_times", []), w.get("b1_fluxes", []), w.get("b1_fluxerrs", []), snr_min_wise)
+    w2_t = _det_times(w.get("b2_times", []), w.get("b2_fluxes", []), w.get("b2_fluxerrs", []), snr_min_wise)
+
+    if require_wise_detection:
+        all_epochs = []  # reset to only WISE times
+
+    if w1_t.size:
+        wise_det_times.append(w1_t[w1_t > t_tail])
+    if w2_t.size:
+        wise_det_times.append(w2_t[w2_t > t_tail])
+
+
+    wise_det_times = np.unique(np.concatenate(wise_det_times) if wise_det_times else np.array([]))
+    combined_det_times = np.unique(np.concatenate([all_epochs, wise_det_times])) if all_epochs.size and wise_det_times.size else (all_epochs if all_epochs.size else wise_det_times)
+    all_epochs = _merge_epochs(combined_det_times, merge_dt=merge_dt)
+
+    # ---- build SEDs -----
+    seds = []
+    for mjd0 in all_epochs:
+        sed = build_sed(mjd0, ztf_resdict, wise_resdict,
+                        max_dt_ztf=max_dt_ztf, max_dt_wise=max_dt_wise,
+                        include_limits=include_limits, snr_min=snr_min,
+                        snr_min_wise=snr_min_wise)
+        if sed["bands"] and _sed_has_required_detections(sed, require_wise_detetection=require_wise_detection):
+            seds.append(sed)
+            
+
+    return seds
+
+# --- Build SEDs after ZTF peak -----
 def build_multi_epoch_seds(ztf_resdict, wise_resdict, max_dt_ztf=5.0, max_dt_wise=5.0,
                            include_limits=True, snr_min=SNR_MIN, snr_min_wise=SNR_MIN_WISE):
     """
