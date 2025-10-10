@@ -205,7 +205,7 @@ def parse_forced_df(df):
     return resdict
 
 
-def get_ztf_forcedphot(filename):
+def get_ztf_forcedphot(filename, SNT=3.0, SNU=5.0): # SNT & SNU values from https://irsa.ipac.caltech.edu/data/ZTF/docs/ztf_forced_photometry.pdf
     """
     Parse a ZTF forced photometry .dat file into times, fluxes, errors, and filters.
     Returns a dictionary grouped by filter.
@@ -223,13 +223,27 @@ def get_ztf_forcedphot(filename):
     # Convert JD to MJD
     df["mjd"] = df["jd"] - 2400000.5
 
-    # Compute magnitudes and errors
+    # Compute SNR
+    flux = df['forcediffimflux'].astype(float)
+    flux_err = df['forcediffimfluxunc'].astype(float)
+    snr = flux / flux_err
+
+    # Detections
+    det = (snr > SNT) & (flux > 0)
+
+    # Compute magnitudes and errors for detections only
     # mag = zpdiff - 2.5*log10(flux), valid only if flux > 0
     df["mag"] = np.nan
     df["mag_err"] = np.nan
-    good = df["forcediffimflux"] > 0
-    df.loc[good, "mag"] = df.loc[good, "zpdiff"] - 2.5*np.log10(df.loc[good, "forcediffimflux"])
-    df.loc[good, "mag_err"] = 1.0857 * df.loc[good, "forcediffimfluxunc"] / df.loc[good, "forcediffimflux"]
+    df.loc[det, "mag"] = df.loc[det, "zpdiff"] - 2.5 * np.log10(df.loc[det, "forcediffimflux"])
+    # 1.0857 = 2.5 / ln(10)
+    df.loc[det, "mag_err"] = 1.0857 * df.loc[det, "forcediffimfluxunc"] / df.loc[det, "forcediffimflux"]
+
+    # Non-detections (upper limits)
+    # mag_UL = zpdiff - 2.5*log10(SNU * sigma_flux)
+    non_det = ~det
+    df['mag_ul'] = np.nan
+    df.loc[non_det, "mag_ul"] = df.loc[non_det, "zpdiff"] - 2.5 * np.log10(SNU * df.loc[non_det, "forcediffimfluxunc"])
 
     # Organize output
     resdict = {}
@@ -237,15 +251,18 @@ def get_ztf_forcedphot(filename):
         mask = df["filter"] == filt
         resdict[filt] = {
             "mjd": df.loc[mask, "mjd"].values,
-            "flux": df.loc[mask, "forcediffimflux"].values,
-            "flux_err": df.loc[mask, "forcediffimfluxunc"].values,
+            "flux": df.loc[mask, "forcediffimflux"].values, # DN units
+            "flux_err": df.loc[mask, "forcediffimfluxunc"].values, # DN units
+            "snr": snr.loc[mask].values, 
             "mag": df.loc[mask, "mag"].values,
             "mag_err": df.loc[mask, "mag_err"].values,
+            "mag_ul": df.loc[mask, "mag_ul"].values,
             "limiting_mag": df.loc[mask, "diffmaglim"].values,
         }
     return resdict
 
-def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, flux=False):
+def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, flux=False,
+                   ylim=(None, None), SNU=5.0):
 
     created_ax = False
     if ax is None:
@@ -259,15 +276,28 @@ def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=T
     all_mjd = []
     all_y = []
 
+    # avoid duplicate legend entries for limits per filter
+    shown_limit_label = set()
+
+    # if flux=True, check if mJy fields are available
+    use_mJy = flux and any(("flux_mJy" in d) for d in resdict.values())
+
     for filt, data in resdict.items():
         color = colors.get(filt,"black")
 
         # --- Detections ---
         mask_det = ~np.isnan(data["mag"])
         if np.any(mask_det):
-
-            yvals = data["flux_mJy"][mask_det] if flux else data["mag"][mask_det]
-            yerrs = data["flux_err_mJy"][mask_det] if flux else data["mag_err"][mask_det]
+            if flux:
+                if "flux_mJy" in data and "flux_err_mJy" in data:
+                    yvals = data["flux_mJy"][mask_det]
+                    yerrs = data["flux_err_mJy"][mask_det]
+                else:
+                    yvals = data["flux"][mask_det]       # DN fallback
+                    yerrs = data["flux_err"][mask_det]   # DN fallback
+            else:
+                yvals = data["mag"][mask_det]
+                yerrs = data["mag_err"][mask_det]
 
             ax.errorbar(
                 data["mjd"][mask_det],
@@ -281,20 +311,35 @@ def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=T
             all_y.extend(yvals)
 
         # --- Non-detections (limits) ---
-        mask_nondet = np.isnan(data["mag"]) & (data["limiting_mag"] > 0)
-        if np.any(mask_nondet):
+        # Use mag_ul when plotting mags; fall back to limiting_mag if mag_ul missing.
+        # In flux space, prefer provided lim_flux_mJy; else compute snu*flux_err in same units.
+        mask_nondet = np.isnan(data["mag"])
 
-            yvals = data["lim_flux_mJy"][mask_nondet] if flux else data["limiting_mag"][mask_nondet]
+        if np.any(mask_nondet):
+            if flux:
+                if use_mJy and "lim_flux_mJy" in data:
+                    yvals_lim = data["lim_flux_mJy"][mask_nondet]
+                else:
+                    yvals_lim = SNU * data['flux_err'][mask_nondet]
+            else:
+                if "mag_ul" in data:
+                    yvals_lim = data["mag_ul"][mask_nondet]
+                else:
+                    yvals_lim = data.get("limiting_mag", np.full_like(data["mjd"], np.nan))[mask_nondet]
+
+            # only plot finite limits
+            finite = np.isfinite(yvals_lim)
 
             ax.scatter(
-                data["mjd"][mask_nondet],
-                yvals,
+                data["mjd"][mask_nondet][finite],
+                yvals_lim[finite],
                 marker="v", alpha=0.5, color=color,
-                label=f"lim. mag {filt}",
+                label=f"lim. mag {filt}" if filt not in shown_limit_label else None,
                 s=40
             )
-            all_mjd.extend(data["mjd"][mask_nondet])
-            all_y.extend(yvals)
+            shown_limit_label.add(filt)
+            all_mjd.extend(data["mjd"][mask_nondet][finite])
+            all_y.extend(yvals_lim[finite])
 
     # --- Auto limits ---
     if all_mjd and all_y:
@@ -304,14 +349,17 @@ def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=T
         if min_mjd is not None and max_mjd is not None:
             ax.set_xlim(min_mjd, max_mjd)
 
-        # y-range: min/max mags + padding
-        ymin = np.nanmin(all_y) - 2.0
-        ymax = np.nanmax(all_y) + 1.0
+        if ylim[0] is not None and ylim[1] is not None:
+            ax.set_ylim(ylim[0], ylim[1])
+        else:
+            # y-range: min/max mags + padding
+            ymin = np.nanmin(all_y) - 2.0
+            ymax = np.nanmax(all_y) + 1.0
 
-        if flux:
-            ax.set_ylim(ymin, ymax)
-        else:   
-            ax.set_ylim(ymax, ymin)  # flip so bright = up
+            if flux:
+                ax.set_ylim(ymin, ymax)
+            else:   
+                ax.set_ylim(ymax, ymin)  # flip so bright = up
 
     if created_ax:
         ax.set_title(f"ZTF Light Curve: {oid}", fontsize=16)
@@ -453,11 +501,16 @@ def convert_ZTF_mag_mJy(res, forced=False):
             data["flux_mJy"][mask_det] = flux_mJy
             data["flux_err_mJy"][mask_det] = flux_err_mJy
 
-            # non-detections
-            mask_nondet = np.isnan(data["mag"]) & (data["limiting_mag"] > 0)
-            lim_mag = data["limiting_mag"][mask_nondet]
-            lim_flux_mJy = 3631 * 10**(-lim_mag/2.5) * 1e3
-            data["lim_flux_mJy"][mask_nondet] = lim_flux_mJy
+            # non-detections: prefer mag_ul, fallback to limiting_mag
+            has_ul = "mag_ul" in data
+            mask_nondet = np.isnan(data["mag"]) & (
+                np.isfinite(data["mag_ul"]) if has_ul else (data["limiting_mag"] > 0)
+            )
+            if np.any(mask_nondet):
+                lim_mag = (data["mag_ul"][mask_nondet] if has_ul
+                           else data["limiting_mag"][mask_nondet])
+                lim_flux_mJy = 3631 * 10**(-lim_mag/2.5) * 1e3
+                data["lim_flux_mJy"][mask_nondet] = lim_flux_mJy
     
     return res 
 
