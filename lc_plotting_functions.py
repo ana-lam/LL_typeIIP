@@ -10,11 +10,17 @@ import json
 import glob
 import os
 from astroquery.irsa import Irsa
+# from astroquery.irsa_dust import IrsaDust
+from dustmaps.sfd import SFDQuery
 from dotenv import load_dotenv
 from io import StringIO
 from astropy.stats import sigma_clipped_stats
+from astropy.cosmology import Planck18 as cosmo
+from astropy import coordinates as coord
+from astropy import units as u
 from requests.auth import HTTPBasicAuth
 import matplotlib.collections as mcoll
+from dust_extinction.parameter_averages import G23
 
 ##########################################################################
 ## ---------- ZTF LIGHT CURVE DATA PARSING AND PLOTTING --------------- ##
@@ -33,6 +39,13 @@ if username is None or password is None:
 # Create a session with your IRSA credentials
 Irsa._session = requests.Session()
 Irsa._session.auth = HTTPBasicAuth(username, password)
+
+# metadata df
+meta = pd.read_csv("data/zenodo_metasample.csv")
+
+import dustmaps.config
+dustmaps.config.config['data_dir'] = '/Users/ana/Documents/LL_typeIIP/dustmaps_data'
+sfd = SFDQuery(map_dir='/Users/ana/Documents/LL_typeIIP/dustmaps_data/sfd')
 
 ## Using a lot of Viraj's code from LSST CCA Summer School
 
@@ -263,10 +276,47 @@ def get_ztf_forcedphot(filename, SNT=3.0, SNU=5.0): # SNT & SNU values from http
 
 def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, flux=False,
                    ylim=(None, None), SNU=5.0):
+    """
+    Plot ZTF forced photometry light curves (apparent magnitude or flux).
+
+    Parameters
+    ----------
+    resdict : dict
+        Dictionary containing forced photometry data by filter.
+        Expected structure:
+            {
+              "ZTF_g": {"mjd": [...], "mag": [...], "mag_err": [...],
+                        "mag_ul": [...], "flux": [...], "flux_err": [...],
+                        "flux_mJy": [...], "flux_err_mJy": [...],
+                        "lim_flux_mJy": [...]},
+              "ZTF_r": {...},
+              ...
+            }
+    oid : str, optional
+        Object ID or name to show in plot title.
+    xlim : tuple, optional
+        (xmin, xmax) for x-axis (MJD). Default (None, None) = auto.
+    ax : matplotlib.axes.Axes, optional
+        Existing matplotlib axis. If None, a new figure is created.
+    show : bool, optional
+        Whether to display the plot. If False and ax is provided, returns the axis.
+    flux : bool, optional
+        If True, plots in flux (mJy) instead of magnitudes.
+    ylim : tuple, optional
+        (ymin, ymax) for y-axis. Default (None, None) = auto.
+    SNU : float, optional
+        Signal-to-noise multiplier for computing flux limits
+        when explicit limit fields are missing (default 5).
+
+    Notes
+    -----
+    - Magnitude plots invert the y-axis (bright = up).
+    - Handles both detections and non-detections (upper limits).
+    - If `flux=True`, tries to use mJy fields first, otherwise raw DN units.
+    """
 
     created_ax = False
     if ax is None:
-        created_ax = True
         fig, ax = plt.subplots(figsize=(9,5))
         created_ax = True
 
@@ -435,28 +485,6 @@ def get_ztf_lc_data(oid, client, ra=None, dec=None,
         res_forced = get_ztf_forcedphot(forced_file)
         results['forced'] = res_forced
 
-        # if ra is None or dec is None:
-        #     meta = client.query_detections(oid, format="pandas")
-        #     if meta.empty:
-        #             raise ValueError(f"No metadata found for {oid}")
-        #     ra = meta["ra"].iloc[0]
-        #     dec = meta["dec"].iloc[0]
-        #     if ra is None or dec is None:
-        #         raise ValueError(f"No RA/Dec found in metadata for {oid}")
-        # if lc_det.empty:
-        #     print(f"No detections found to anchor forced photometry window for {oid}")
-
-        # try:
-        #     jobid = submit_forced_phot(
-        #         ra, dec, lc_det, pad_before=pad_before, pad_after=pad_after
-        #     )
-        #     print(f"Submitted IRSA forced photometry job {jobid} for {oid}")
-        #     df = fetch_forced_phot(jobid)
-        #     res_forced = parse_forced_df(df)
-        #     results["forced"] = res_forced
-        # except Exception as e:
-        #     print(f"Forced photometry fetch failed for {oid}: {e}")
-
     return results
 
 def convert_ZTF_mag_mJy(res, forced=False):
@@ -513,6 +541,521 @@ def convert_ZTF_mag_mJy(res, forced=False):
                 data["lim_flux_mJy"][mask_nondet] = lim_flux_mJy
     
     return res 
+
+##########################################################################
+## ------ CORRECTIONS FOR INTRINSIC LIGHT CURVE FROM ZTF DATA --------- ##
+##########################################################################
+
+def _add_MW_extinction(meta_df, coords_df_path="data/ZTF_coords.csv"):
+    """
+    Add Milky Way extinction E(B-V) and A_V,MW to metadata DataFrame.
+    Following Schlafly & Finkbeiner (2011) scaling (0.86 * SFD),
+    Cardelli et al. (1989) law, and R_V = 3.1.
+    """
+
+    sfd = SFDQuery()
+    R_V = 3.1
+    SF11_SCALE = 0.86
+    
+    EBV_list = []
+    A_V_MW_list = []
+    coords_df = pd.read_csv(coords_df_path)
+
+    for name in meta_df["name"]:
+        row_coords = coords_df[coords_df['oid'] == name]
+        if row_coords.empty:
+            EBV = np.nan
+            A_V_MW = np.nan
+        else:
+            ra = float(row_coords['meanra'].values[0])
+            dec = float(row_coords['meandec'].values[0])
+            c = coord.SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
+            EBV = float(sfd(c)) * SF11_SCALE
+            A_V_MW = R_V * EBV
+        EBV_list.append(EBV)
+        A_V_MW_list.append(A_V_MW)
+
+    meta_df['EBV_MW'] = EBV_list
+    meta_df['A_V_MW'] = A_V_MW_list
+    meta_df.to_csv("data/zenodo_metasample_with_MW.csv", index=False)
+
+def calculate_distance_modulus(z):
+    """Calculate distance modulus from redshift using Planck18 cosmology."""
+    dl_pc = cosmo.luminosity_distance(z).to('pc').value
+    return 5 * np.log10(dl_pc / 10)
+
+def correct_extinction(mag, filt, Av_MW, Av_host=0.0):
+    """
+    Correct magnitude for Milky Way and host galaxy extinction.
+
+    Parameters
+    ----------
+    mag : float, array
+        Observed magnitude.
+    filt : str
+        Filter name.
+    Av_host : float, optional
+        Host galaxy V-band extinction. Default is 0.0.
+    Av_MW: float
+        Milky Way V-band extinction.
+
+    Returns
+    -------
+    mag_corr : float, array 
+        Extinction-corrected magnitude.
+    A_total : float
+        Total extinction applied (MW + host).
+    """
+
+    # Band-dependent A_lambda / A_V ratios for ZTF (~PS1 system, RV=3.1)
+    coeffs = {
+        "g": 3.172 / 2.742,  # 1.157
+        "r": 2.271 / 2.742,  # 0.828
+        "i": 1.682 / 2.742,  # 0.613
+    }
+    f = filt.lower()[0]
+    factor = coeffs.get(f, 1.0)  # fallback to 1.0 if unknown filter
+
+    # total extinction in this band
+    A_total = factor * (Av_MW + Av_host)
+
+    mag_corr = mag - A_total
+    return mag_corr, A_total
+
+def intrinsic_lc_corrections(res, sigma_A=True, flux=True):
+    """
+    Apply distance and extinction corrections to ZTF light curve data."""
+
+    meta_df = meta
+
+    if "forced" not in res:
+        print("No forced photometry data to correct.")
+        return res
+    
+    oid = res["oid"]
+    forced = res["forced"].copy()
+
+    meta_row = meta_df[meta_df['name']==res['oid']]
+    if meta_row.empty:
+        print(f"No metadata found for {res['oid']}.")
+        return res
+    
+    # --- Distance modulus ---
+    z = meta_row['redshift'].values[0]
+    dist_mod = calculate_distance_modulus(z)
+
+    # -- Extinction parameters ---
+    _add_MW_extinction(meta_df)
+    Av_host = meta_row['Avhost'].values[0] if 'Avhost' in meta_row.columns else 0.0
+    Av_MW = meta_row['A_V_MW'].values[0] if 'A_V_MW' in meta_row.columns else 0.0
+
+    # --- Optional uncertainties ----
+    if sigma_A:
+        sigma_A = 0.05
+    else:
+        sigma_A = 0.0
+
+    # --- Apply corrections per filter ---
+    for filt, data in forced.items():
+        if "mag" not in data or np.all(np.isnan(data["mag"])):
+            continue
+
+        mags = np.array(data["mag"], dtype=float)
+        mag_errs = np.array(data['mag_err'], dtype=float)
+        mag_ul = np.array(data.get('mag_ul', np.full_like(mags, np.nan)), dtype=float)
+        lim_mag = np.array(data.get('limiting_mag', np.full_like(mags, np.nan)), dtype=float)
+
+        mags_corr = np.full_like(mags, np.nan)
+        mag_errs_corr = np.full_like(mags, np.nan)
+        mag_ul_corr = np.full_like(mag_ul, np.nan)
+        lim_mag_corr = np.full_like(lim_mag, np.nan)
+
+        # detections
+        for i, m in enumerate(mags):
+            if np.isfinite(m):
+                m_corr, A_total = correct_extinction(m, filt, Av_host, Av_MW)
+                mags_corr[i] = m_corr - dist_mod # intrinsic abs mag
+                # Error propagation
+                mag_errs_corr[i] = np.sqrt(mag_errs[i]**2 + sigma_A**2)
+
+        # non-detections
+        for i, m_ul in enumerate(mag_ul):
+            if np.isfinite(m_ul):
+                m_ul_corr, A_total = correct_extinction(m_ul, filt, Av_host, Av_MW)
+                mag_ul_corr[i] = m_ul_corr - dist_mod
+        for i, lm in enumerate(lim_mag):
+            if np.isfinite(lm):
+                lm_corr, A_total = correct_extinction(lm, filt, Av_host, Av_MW)
+                lim_mag_corr[i] = lm_corr - dist_mod
+
+        data["mag_intrinsic"] = mags_corr
+        data["mag_intrinsic_err"] = mag_errs_corr
+        data["mag_ul_intrinsic"] = mag_ul_corr
+        data["limiting_mag_intrinsic"] = lim_mag_corr
+        data["A_total"] = A_total
+
+    # --- Convert to fluxes if requested ---
+    if flux:
+        forced = convert_ZTF_mag_mJy({"forced": forced}, forced=True)["forced"]
+
+        # calculate intrinsic fluxes
+        for filt, data in forced.items():
+            A_total = data.get("A_total", 0.0)
+            f_corr = 10**(0.4 * (A_total + dist_mod))
+
+            for key in ["flux_mJy", "flux_err_mJy", "lim_flux_mJy"]:
+                if key in data:
+                    flux = np.array(data[key], dtype=float)
+                    flux_intrinsic = flux * f_corr
+                    data[f"{key}_intrinsic"] = flux_intrinsic
+            
+            # DN fallback
+            for key in ["flux", "flux_err"]:
+                if key in data:
+                    flux = np.array(data[key], dtype=float)
+                    flux_intrinsic = flux * f_corr
+                    data[f"{key}_intrinsic"] = flux_intrinsic
+
+    
+    res["forced_corr"] = forced
+
+    return res
+
+def plot_intrinsic_forced_lc(resdict, oid="ZTF source", ax=None, show=True, show_comparison=False, 
+                             flux=False, xlim=(None,None), ylim=(None, None), SNU=5.0):
+    """
+    Plot ZTF forced photometry intrinsic (absolute) light curve, after extinction- 
+    and distance-corrections.
+
+    Parameters
+    ----------
+    resdict : dict
+        Result dictionary from intrinsic_lc_corrections().
+        Expected structure:
+            res["forced_corr"] = {
+                "ZTF_g": {
+                    "mjd": [...],
+                    "mag": [...],
+                    "mag_err": [...],
+                    "mag_intrinsic": [...],
+                    "A_total": [...],
+                },
+                "ZTF_r": {...},
+                "ZTF_i": {...},
+            }
+    oid : str, optional
+        Object name or ID for labeling.
+    flux : bool, optional
+        If True, plots fluxes (mJy) instead of magnitudes.
+    xlim : tuple, optional
+        (xmin, xmax) for x-axis. Default (None, None) = auto.
+    ax : matplotlib.axes.Axes, optional
+        Existing axis to plot into. If None, creates new figure.
+    show : bool, optional
+        Whether to display the plot interactively. Default True.
+    ylim : tuple, optional
+        (ymin, ymax) for y-axis. Default auto.
+    show_comparison : bool, optional
+        If True, overlays observed (apparent) magnitudes as hollow markers.
+
+    Notes
+    -----
+    - Plots *absolute* magnitudes (distance- and extinction-corrected).
+    - Inverts the y-axis (bright = up).
+    """
+
+    if not any("mag_intrinsic" in d for d in resdict.values()):
+        print("No corrected light curve data found. Run intrinsic_lc_corrections() first.")
+        return
+    
+    created_ax = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9,5))
+        created_ax = True
+
+    if show_comparison and not flux:
+        ax_abs = ax
+        ax_app = ax.twinx()
+    else:
+        ax_abs = ax
+        ax_app = None
+
+    colors = {"ZTF_g":"green","ZTF_r":"red","ZTF_i":"orange"}
+    markers = {"ZTF_g":"o","ZTF_r":"X","ZTF_i":"D"}
+
+    all_mjd = []
+    all_y = []
+
+    # avoid duplicate legend entries for limits per filter
+    shown_limit_label = set()
+
+    # if flux=True, check if mJy fields are available
+    use_mJy = flux and any(("flux_mJy" in d) for d in resdict.values())
+
+    for filt, data in resdict.items():
+        color = colors.get(filt,"black")
+        marker = markers.get(filt, "o")
+
+        mjd = data["mjd"]
+
+        # --- Detections ---
+        mask_det = ~np.isnan(data["mag"])
+        if np.any(mask_det):
+            if flux:
+                if "flux_mJy_intrinsic" in data and "flux_err_mJy_intrinsic" in data:
+                    yvals = data["flux_mJy_intrinsic"][mask_det]
+                    yerrs = data["flux_err_mJy_intrinsic"][mask_det]
+                    yvals_obs = data["flux_mJy"][mask_det]
+                    yerrs_obs = data["flux_err_mJy"][mask_det]
+                else:
+                    yvals = data["flux_intrinsic"][mask_det]       # DN fallback
+                    yerrs = data["flux_intrinsic_err"][mask_det]   # DN fallback
+            else:
+                yvals = data["mag_intrinsic"][mask_det]
+                yerrs = data["mag_intrinsic_err"][mask_det]
+                yvals_obs = data["mag"][mask_det]
+                yerrs_obs = data["mag_err"][mask_det]
+
+            # plot intrinsic detections
+            ax_abs.errorbar(
+                data["mjd"][mask_det],
+                yvals,
+                yerr=yerrs,
+                color=color, label=filt,
+                marker=marker,
+                linestyle='none'
+            )
+            all_mjd.extend(data["mjd"][mask_det])
+            all_y.extend(yvals)
+
+            if show_comparison:
+                # plot apparent mag too
+                if show_comparison and ax_app is not None and not flux:
+                    ax_app.errorbar(
+                        mjd[mask_det], yvals_obs, yerr=yerrs_obs,
+                        color=color, marker=marker,
+                        linestyle='none', markerfacecolor='none',
+                        alpha=0.6, label=f"{filt} (apparent)"
+                    )
+
+        # --- Non-detections (limits) ---
+        # Use mag_ul when plotting mags; fall back to limiting_mag if mag_ul missing.
+        # In flux space, prefer provided lim_flux_mJy; else compute snu*flux_err in same units.
+        mask_nondet = np.isnan(data["mag_intrinsic"])
+
+        if np.any(mask_nondet):
+            if flux:
+                if use_mJy and "lim_flux_intrinsic_mJy" in data:
+                    yvals_lim = data["lim_flux_intrinsic_mJy"][mask_nondet]
+                else:
+                    yvals_lim = SNU * data['flux_intrinsic_err'][mask_nondet]
+            else:
+                if "mag_intrinsic_ul" in data:
+                    yvals_lim = data["mag_intrinsic_ul"][mask_nondet]
+                else:
+                    yvals_lim = data.get("limiting_mag_intrinsic", np.full_like(data["mjd"], np.nan))[mask_nondet]
+
+            # only plot finite limits
+            finite = np.isfinite(yvals_lim)
+
+            ax_abs.scatter(
+                data["mjd"][mask_nondet][finite],
+                yvals_lim[finite],
+                marker="v", alpha=0.5, color=color,
+                label=f"lim. mag {filt}" if filt not in shown_limit_label else None,
+                s=40
+            )
+            shown_limit_label.add(filt)
+            all_mjd.extend(data["mjd"][mask_nondet][finite])
+            all_y.extend(yvals_lim[finite])
+
+    # --- Auto limits ---
+    if all_mjd and all_y:
+        if xlim[0] is not None and xlim[1] is not None:
+            ax_abs.set_xlim(xlim)
+        if ylim[0] is not None and ylim[1] is not None:
+            ax_abs.set_ylim(ylim)
+        else:
+            ymin = np.nanmin(all_y) - 2
+            ymax = np.nanmax(all_y) + 1
+            if flux:
+                ax_abs.set_ylim(ymin, ymax)
+            else:
+                ax_abs.set_ylim(ymax, ymin)  # flip so bright = up
+
+    if created_ax:
+        ax_abs.set_title(f"ZTF Light Curve (intrinsic): {oid}", fontsize=16)
+        ax_abs.set_xlabel("MJD", fontsize=14)
+        if flux:
+            ax_abs.set_ylabel("Flux (mJy)", fontsize=14)
+        else:
+            ax_abs.set_ylabel("Absolute magnitude", fontsize=14)
+            if show_comparison and ax_app is not None:
+                ax_app.set_ylabel("Apparent magnitude", fontsize=14)
+                ax_app.invert_yaxis()
+            ax_abs.invert_yaxis()
+        if show_comparison and ax_app is not None:
+            h1, l1 = ax_abs.get_legend_handles_labels()
+            h2, l2 = ax_app.get_legend_handles_labels()
+            ax_abs.legend(h1 + h2, l1 + l2, fontsize=9)
+        else:
+            ax_abs.legend(fontsize=9)
+        ax_abs.grid(True, alpha=0.4)
+
+        if show:
+            plt.show()
+
+    if not created_ax:
+        return ax
+
+def plot_forced_lc_abs_app(
+    resdict, oid="ZTF source", ax=None, show=True, show_comparison=True,
+    flux=False, xlim=(None, None), ylim=(None, None), SNU=5.0
+    ):
+    """
+    Plot ZTF forced photometry intrinsic (absolute) light curve with apparent/absolute y-axes.
+
+    Left y-axis: apparent magnitude
+    Right y-axis: absolute magnitude (distance- and extinction-corrected)
+    """
+
+
+    if not any("mag_intrinsic" in d for d in resdict.values()):
+        print("No corrected light curve data found. Run intrinsic_lc_corrections() first.")
+        return
+    
+    created_ax = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        created_ax = True
+
+    colors = {"ZTF_g": "green", "ZTF_r": "red", "ZTF_i": "orange"}
+    markers = {"ZTF_g": "o", "ZTF_r": "X", "ZTF_i": "D"}
+
+    all_mjd, all_y = [], []
+    shown_limit_label = set()
+    use_mJy = flux and any(("flux_mJy" in d) for d in resdict.values())
+
+    # --- Plot data per filter ---
+    for filt, data in resdict.items():
+        color = colors.get(filt, "black")
+        marker = markers.get(filt, "o")
+        mjd = np.array(data["mjd"])
+
+        # --- Detections ---
+        mask_det = ~np.isnan(data["mag"])
+        if np.any(mask_det):
+            if flux:
+                if "flux_mJy_intrinsic" in data:
+                    yvals = data["flux_mJy_intrinsic"][mask_det]
+                    yerrs = data["flux_err_mJy_intrinsic"][mask_det]
+                else:
+                    yvals = data["flux_intrinsic"][mask_det]
+                    yerrs = data["flux_intrinsic_err"][mask_det]
+            else:
+                yvals = data["mag"][mask_det]  # apparent
+                yerrs = data["mag_err"][mask_det]
+
+            ax.errorbar(
+                mjd[mask_det],
+                yvals,
+                yerr=yerrs,
+                color=color,
+                marker=marker,
+                linestyle="none",
+                label=filt,
+            )
+
+            all_mjd.extend(mjd[mask_det])
+            all_y.extend(yvals)
+
+        # --- Non-detections (limits) ---
+        mask_nondet = np.isnan(data["mag_intrinsic"])
+        if np.any(mask_nondet):
+            if flux:
+                if use_mJy and "lim_flux_intrinsic_mJy" in data:
+                    yvals_lim = data["lim_flux_intrinsic_mJy"][mask_nondet]
+                else:
+                    yvals_lim = SNU * data["flux_intrinsic_err"][mask_nondet]
+            else:
+                if "mag_ul" in data:
+                    yvals_lim = data["mag_ul"][mask_nondet]
+                else:
+                    yvals_lim = data.get(
+                        "limiting_mag", np.full_like(mjd, np.nan)
+                    )[mask_nondet]
+
+            finite = np.isfinite(yvals_lim)
+            ax.scatter(
+                mjd[mask_nondet][finite],
+                yvals_lim[finite],
+                marker="v",
+                alpha=0.5,
+                color=color,
+                s=40,
+                label=f"lim. mag {filt}" if filt not in shown_limit_label else None,
+            )
+            shown_limit_label.add(filt)
+            all_mjd.extend(mjd[mask_nondet][finite])
+            all_y.extend(yvals_lim[finite])
+
+    # --- Axis limits ---
+    if all_mjd and all_y:
+        if xlim[0] is not None and xlim[1] is not None:
+            ax.set_xlim(xlim)
+        else:
+            ax.set_xlim(np.nanmin(all_mjd) - 5, np.nanmax(all_mjd) + 5)
+
+        if ylim[0] is not None and ylim[1] is not None:
+            ax.set_ylim(ylim)
+        else:
+            ymin, ymax = np.nanmin(all_y) - 1, np.nanmax(all_y) + 1
+            ax.set_ylim(ymax, ymin)  # invert for apparent mag (bright = up)
+
+    # --- Labels and dual-axis setup ---
+    if created_ax:
+        ax.set_title(f"ZTF Light Curve (intrinsic): {oid}", fontsize=16)
+        ax.set_xlabel("MJD", fontsize=14)
+        if flux:
+            ax.set_ylabel("Flux (mJy)", fontsize=14)
+        else:
+            ax.set_ylabel("Apparent magnitude", fontsize=14)
+            ax.invert_yaxis()
+
+            if show_comparison:
+                ax_abs = ax.twinx()
+
+                # --- Get distance modulus + extinction ---
+                meta_row = meta[meta["name"] == oid]
+                if not meta_row.empty:
+                    z = meta_row["redshift"].values[0]
+                    dist_mod = calculate_distance_modulus(z)
+                    Av_host = meta_row["Avhost"].values[0] if "Avhost" in meta_row.columns else 0.0
+                    Av_MW = meta_row["A_V_MW"].values[0] if "A_V_MW" in meta_row.columns else 0.0
+                    A_total = Av_host + Av_MW
+                else:
+                    dist_mod = 0
+                    A_total = 0
+
+                def app_to_abs(m): return m - dist_mod - A_total
+                def abs_to_app(M): return M + dist_mod + A_total
+
+                # Match apparent axis visually, just offset numerically
+                app_ylim = ax.get_ylim()
+                ax_abs.set_ylim(app_to_abs(app_ylim[0]), app_to_abs(app_ylim[1]))
+                ax_abs.set_ylabel("Absolute magnitude", fontsize=14)
+                ax.set_ylim(ymax, ymin) # same visual direction as left
+                ax_abs.invert_yaxis()
+
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.4)
+        plt.tight_layout()
+
+        if show:
+            plt.show()
+
+    if not created_ax:
+        return ax
 
 ###########################################################################
 ## ---------- WISE LIGHT CURVE DATA PARSING AND PLOTTING --------------- ##
