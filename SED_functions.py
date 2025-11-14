@@ -169,6 +169,9 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0,
     all_epochs = _merge_epochs(ztf_det_times, merge_dt=merge_dt)
 
     # ---- candidate epochs from WISE ----
+
+    ######## USE WISE DET TO ANCHOR MJD0 SELECTION ########
+
     wise_det_times = []
 
     w = subtract_wise_parity_baseline(
@@ -181,7 +184,7 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0,
     w2_t = _det_times(w.get("b2_times", []), w.get("b2_fluxes", []), w.get("b2_fluxerrs", []), snr_min_wise)
 
     if require_wise_detection:
-        all_epochs = []  # reset to only WISE times
+        all_epochs = np.array([])  # reset to only WISE times
 
     if w1_t.size:
         wise_det_times.append(w1_t[w1_t > t_tail])
@@ -190,7 +193,7 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0,
 
 
     wise_det_times = np.unique(np.concatenate(wise_det_times) if wise_det_times else np.array([]))
-    combined_det_times = np.unique(np.concatenate([all_epochs, wise_det_times])) if all_epochs.size and wise_det_times.size else (all_epochs if all_epochs.size else wise_det_times)
+    combined_det_times = np.unique(np.concatenate([all_epochs, wise_det_times])) if all_epochs.size and wise_det_times.size else all_epochs if all_epochs.size else wise_det_times
     all_epochs = _merge_epochs(combined_det_times, merge_dt=merge_dt)
 
     # ---- build SEDs -----
@@ -395,8 +398,8 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
         Fnu_cgs   = Fnu  * 1e-26  # erg s^-1 cm^-2 Hz^-1
         eFnu_cgs  = eFnu * 1e-26
         lam_cm    = lam * 1e-8 # cm
-        lamF      = (const.c.value / lam_cm) * Fnu_cgs     # erg s^-1 cm^-2
-        e_lamF    = (const.c.value / lam_cm) * eFnu_cgs
+        lamF      = (const.c.to('cm/s').value / lam_cm) * Fnu_cgs     # erg s^-1 cm^-2
+        e_lamF    = (const.c.to('cm/s').value / lam_cm) * eFnu_cgs
         
         # x-axis in micrometers (μm): 1 μm = 10,000 Å
         x  = lam * 1e-4 # μm
@@ -412,13 +415,17 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
     return x, y, ey, x_label, y_label
 
 # --------- plotter ----------
-def plot_sed(sed, y_mode = "Fnu", logy=False, logx=False, title_prefix="SED", 
+def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="SED", 
              secax=False, savepath=None):
     """
     y_mode='Fnu'  -> Fnu vs nu (mJy, Hz)
-    y_mode='Flam' -> Flam vs λ (cgs/Å, Å)
+    y_mode='Flam' -> Flam vs λ (cgs/Ang, Ang)
     """
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+
+    created_ax = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        created_ax = True
 
     x, y, ey, x_label, y_label = _prepare_sed_xy(sed, y_mode=y_mode)
     bands = np.array(sed["bands"])
@@ -506,5 +513,8 @@ def plot_sed(sed, y_mode = "Fnu", logy=False, logx=False, title_prefix="SED",
     if savepath:
             plt.savefig(savepath, format="pdf", bbox_inches="tight")
             print(f"Saved plot to {savepath}")
-    else:
+    
+    if created_ax:
         plt.show()
+
+    return ax
