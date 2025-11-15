@@ -102,7 +102,7 @@ def run_single_model(job):
         return dict(tstar=tstarval, tdust=tdustval, tau=tauval, outpath=None, ierror=1, error=str(e), cached=False)
 
     os.chdir(prev_cwd)
-    
+
     # Save output
     if ierror == 0:
         outpath = run_dir / "sed.dat"
@@ -162,7 +162,6 @@ def main():
                         help="Comma-separated Tdust values in K, e.g. '900,1000'")
     parser.add_argument("--tau_list", type=str, default=None,
                         help="Comma-separated tauV values, e.g. '0.03,0.1,0.3'")
-
 
     args = parser.parse_args()
 
