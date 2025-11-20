@@ -1,5 +1,6 @@
 data/Das_forced_photometry_files
 data/ztf_snii_lcs_WISE
+data/ztf_resdicts
 *.python-version
 *.DS_Store
 .env
@@ -9,6 +10,7 @@ plot_sample_2/
 entire_sample/
 entire_sample_wWISE/
 entire_sample_wWISE_2/
+entire_sample_wWISE_new/
 dusty/dusty_runs/
 dusty/dusty_run_test/
 dustmaps_data/
