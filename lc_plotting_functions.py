@@ -1,9 +1,7 @@
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from alerce.core import Alerce
-from tqdm import tqdm
 import requests
 import time
 import json
@@ -20,7 +18,7 @@ from astropy import coordinates as coord
 from astropy import units as u
 from requests.auth import HTTPBasicAuth
 import matplotlib.collections as mcoll
-from dust_extinction.parameter_averages import G23
+import pickle
 
 ##########################################################################
 ## ---------- ZTF LIGHT CURVE DATA PARSING AND PLOTTING --------------- ##
@@ -477,7 +475,6 @@ def get_ztf_lc_data(oid, client, ra=None, dec=None,
     if doStamps and not lc_det.empty:
         plot_stamps(oid, lc_det, client)
 
-    # --- Fetch forced photometry from IRSA ---
     if add_forced:
 
         # Use Kaustav's published forced photometry data
@@ -485,6 +482,10 @@ def get_ztf_lc_data(oid, client, ra=None, dec=None,
         res_forced = get_ztf_forcedphot(forced_file)
         results['forced'] = res_forced
 
+    pkl_filename = f"/Users/ana/Documents/LL_typeIIP/data/ztf_resdicts/{oid}.pkl"
+    with open(pkl_filename, "wb") as f:
+        pickle.dump(results, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print("Saved ztf_resdict for", oid, "to data/ztf_resdicts")
     return results
 
 def convert_ZTF_mag_mJy(res, forced=False):
