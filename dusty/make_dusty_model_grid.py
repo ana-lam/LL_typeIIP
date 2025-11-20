@@ -23,14 +23,14 @@ import itertools as it
 
 def run_single_model(job):
     """Run a single DUSTY model in its own directory and write sed.dat with given parameters."""
-    (tstarval, tdustval, tauval,
-     args, dust_type, blackbody, shell_thickness,
+    (tstarval, tdustval, tauval, shell_thick_val,
+     args, dust_type, blackbody,
      tstarmin, tstarmax, custom_grain_distribution,
      tau_wav_micron, base_workdir) = job
     
     base_workdir = Path(base_workdir).resolve()
 
-    leaf = f"Tstar_{int(tstarval)}_Tdust_{int(tdustval)}_tau_{tauval:g}".replace('.', '_')
+    leaf = f"Tstar_{int(tstarval)}_Tdust_{int(tdustval)}_tau_{tauval:g}_thick_{shell_thick_val:g}".replace('.', '_')
     run_dir = (base_workdir / leaf).resolve() 
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -39,7 +39,7 @@ def run_single_model(job):
     dst = run_dir / "dusty"
 
     if not src.exists():
-        return dict(tstar=tstarval, tdust=tdustval, tau=tauval,
+        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, shell_thickness=shell_thick_val,
                     outpath=None, r1=None, ierror=1,
                     error=f"DUSTY binary not found at {src}", cached=False)
 
@@ -48,7 +48,7 @@ def run_single_model(job):
         # ensure it’s executable
         dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     if not os.access(dst, os.X_OK):
-        return dict(tstar=tstarval, tdust=tdustval, tau=tauval,
+        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, shell_thickness=shell_thick_val,
                     outpath=None, r1=None, ierror=1,
                     error=f"DUSTY binary at {dst} is not executable", cached=False)
 
@@ -58,12 +58,13 @@ def run_single_model(job):
     outpath = run_dir / "sed.dat"
     if outpath.exists():
         # already done
-        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, outpath=outpath, r1=None, ierror=0, cached=True)
+        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, shell_thickness=shell_thick_val, outpath=outpath, r1=None, ierror=0, cached=True)
     
     # Build DUSTY parameters
     tstar = Parameter(name="tstar", value=float(tstarval), is_variable=False)
     tdust = Parameter(name="tdust", value=float(tdustval), is_variable=True)
     tau = Parameter(name="tau", value=float(tauval), is_variable=False)
+    shell_thickness = Parameter(name="shell_thickness", value=float(shell_thick_val), is_variable=False)
 
     dusty_parameters = DustyParameters(
         tstar=tstar,
@@ -99,7 +100,7 @@ def run_single_model(job):
     except Exception as e:
         os.chdir(prev_cwd)
         print("E:", e)
-        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, outpath=None, ierror=1, error=str(e), cached=False)
+        return dict(tstar=tstarval, tdust=tdustval, tau=tauval, shell_thickness=shell_thick_val, outpath=None, ierror=1, error=str(e), cached=False)
 
     os.chdir(prev_cwd)
 
@@ -111,8 +112,8 @@ def run_single_model(job):
             f.write("lam, flux\n")
             for ind in range(len(lam)):
                 f.write(f"{lam[ind]}, {flx[ind]}\n")
-    
-    return dict(tstar=tstarval, tdust=tdustval, tau=tauval, outpath=outpath, r1=r1, ierror=ierror, cached=False)
+
+    return dict(tstar=tstarval, tdust=tdustval, tau=tauval, shell_thickness=shell_thick_val, outpath=outpath, r1=r1, ierror=ierror, cached=False)
 
 def main():
     
@@ -162,6 +163,8 @@ def main():
                         help="Comma-separated Tdust values in K, e.g. '900,1000'")
     parser.add_argument("--tau_list", type=str, default=None,
                         help="Comma-separated tauV values, e.g. '0.03,0.1,0.3'")
+    parser.add_argument("--thick_list", type=str, default=None,
+                        help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'")
 
     args = parser.parse_args()
 
@@ -172,14 +175,17 @@ def main():
     # -----------------------------
 
     # Stellar temperature (K): cool photosphere range appropriate for your source
-    tstar_values = [3500, 4000, 4500, 5000, 5500, 6000]
+    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000]
 
     # Inner dust temperature (K): warm silicate near sublimation
-    tdust_values = [800, 900, 1000, 1100, 1200, 1300]
+    tdust_values = [800, 850, 900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)
-    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 3.0]
+    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 2.0, 3.0, 4.0]
+
+    # Thickness (R_out / R_in)
+    shell_thickness_values = [1.2, 1.5, 2.0, 3.0, 5.0]
 
     # Overrides from CLI if given
     def _parse_list(s):
@@ -192,13 +198,15 @@ def main():
         tdust_values = _parse_list(args.tdust_list)
     if args.tau_list:   
         tau_values = _parse_list(args.tau_list)
+    if args.thick_list:
+        shell_thickness_values = _parse_list(args.thick_list)
 
     # -----------------------------
     # Build parameter objects
     # -----------------------------
     
     blackbody = Parameter(name="blackbody", value=True)
-    shell_thickness = Parameter(name="shell_thickness", value=args.thick)
+    # shell_thickness = Parameter(name="shell_thickness", value=args.thick)
 
     # Dust label: pure silicate (DL) with optional alumina fraction
     # dust_label = f'si_{(1 - args.al)}_al_{args.al}_{args.al_type}_tau_{args.tau_wav_micron}um'
@@ -217,7 +225,7 @@ def main():
     # Paths (no chdir)
     # -----------------------------
 
-    workdir = (Path(args.workdir) / f'{dust_label}_thick_{shell_thickness.value}').resolve()
+    workdir = (Path(args.workdir) / f'{dust_label}_thick_grid').resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
     dusty_dir_abs = Path(args.dusty_file_dir).resolve()
@@ -232,11 +240,11 @@ def main():
     # -----------------------------
 
     jobs = [
-        (t, d, tv, 
-         args, dust_type, blackbody, shell_thickness,
+        (t, d, tv, thick,
+         args, dust_type, blackbody,
          tstarmin, tstarmax, custom_grain_distribution,
          tau_wav_micron, workdir)
-         for t, d, tv in it.product(tstar_values, tdust_values, tau_values)
+         for t, d, tv, thick in it.product(tstar_values, tdust_values, tau_values, shell_thickness_values)
     ]
 
     max_workers = min(os.cpu_count() or 2, 4)
@@ -248,12 +256,12 @@ def main():
             res = fut.result()
             results_summary.append(res)
             status = "OK" if res.get("ierror", 1) == 0 else "ERROR"
-            logger.info(f"{status}  T*={res['tstar']} Td={res['tdust']} tau={res['tau']}  -> {res.get('outpath')}")
+            logger.info(f"{status}  T*={res['tstar']} Td={res['tdust']} tau={res['tau']} thick={res['shell_thickness']}  -> {res.get('outpath')}")
     
     # Write summary CSV
     idx_path = Path(workdir) / "model_grid_summary.csv"
     with idx_path.open('w', newline='') as csvfile:
-        fieldnames = ["tstar", "tdust", "tau", "outpath", "r1", "ierror", "cached", "error"]
+        fieldnames = ["tstar", "tdust", "tau", "shell_thickness", "outpath", "r1", "ierror", "cached", "error"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for row in results_summary:
