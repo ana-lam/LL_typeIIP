@@ -68,7 +68,8 @@ def _nearest_ul(time_mjd, err_mJy, mjd0, max_dt, n_sigma=3):
         return (time_mjd[k], n_sigma*err_mJy[k])
     return None
 
-def _sed_has_required_detections(sed, require_wise_detetection=True):
+def _sed_has_required_detections(sed, require_wise_detetection=True,
+                                 min_detected_bands=2):
     """
     Keep only SEDs that have at least one *detection* (not UL) in any ZTF band
     AND at least one *detection* in any WISE band.
@@ -79,6 +80,7 @@ def _sed_has_required_detections(sed, require_wise_detetection=True):
 
     # detections mask
     det = ~is_ul
+    det_bands = bands[det]
 
     # any ZTF detection?
     any_ztf_det = np.any(det & np.isin(bands, ["ZTF_g", "ZTF_r", "ZTF_i"]))
@@ -88,16 +90,18 @@ def _sed_has_required_detections(sed, require_wise_detetection=True):
     # drop SEDs with no detections at all (i.e., only ULs)
     any_detection = np.any(det)
 
+    n_det_bands = np.unique(det_bands).size
+
     if require_wise_detetection:
-        return any_detection and any_ztf_det and any_wise_det
+        return any_detection and any_ztf_det and any_wise_det and (n_det_bands >= min_detected_bands)
     else:
-        return any_detection and any_ztf_det
+        return any_detection and any_ztf_det and (n_det_bands >= min_detected_bands)
 
 # --- Build SEDs after tail-onset using tail start from CSV -----
-def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0, 
-                                     max_dt_wise=5.0, include_limits=True, snr_min=SNR_MIN,
+def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0, 
+                                     max_dt_wise=1.0, include_limits=True, snr_min=SNR_MIN,
                                      snr_min_wise=SNR_MIN_WISE, csv_path="data/TableA_full_machine_readable_params.csv",
-                                     tail_offset_days=0.0, merge_dt=1.0, require_wise_detection=False,
+                                     tail_offset_days=0.0, merge_dt=4.0, require_wise_detection=False,
                                      min_detected_bands=2, include_plateau_epoch=True):
     """
     Build SEDs for any epochs **after plateau end** that have >= `min_detected_bands`
@@ -203,7 +207,9 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=5.0,
                         max_dt_ztf=max_dt_ztf, max_dt_wise=max_dt_wise,
                         include_limits=include_limits, snr_min=snr_min,
                         snr_min_wise=snr_min_wise)
-        if sed["bands"] and _sed_has_required_detections(sed, require_wise_detetection=require_wise_detection):
+        if sed["bands"] and _sed_has_required_detections(sed, 
+                                                         require_wise_detetection=require_wise_detection, 
+                                                         min_detected_bands=min_detected_bands):
             seds.append(sed)
             
 
@@ -430,6 +436,7 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="
     x, y, ey, x_label, y_label = _prepare_sed_xy(sed, y_mode=y_mode)
     bands = np.array(sed["bands"])
     is_ul = np.array(sed["is_ul"])
+    dt = np.array(sed["dt_labels"])
 
     # detections per band
     for b in np.unique(bands):
@@ -440,7 +447,7 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="
                              color=SED_COLORS.get(b, "black"),
                              mec=SED_COLORS.get(b, "black"),
                              mfc=SED_COLORS.get(b, "black"),
-                             linestyle="none", label=b)
+                             linestyle="none", label=b + f" ({dt[sel][0]})")
 
     # upper limits
     for b in np.unique(bands):

@@ -11,6 +11,8 @@ import csv
 import shutil
 import stat
 import subprocess
+import re
+import pandas as pd
 
 # pydusty imports
 from pydusty.dusty import DustyParameters, Dusty, Dusty_Alumina_SilDL
@@ -21,6 +23,26 @@ from pydusty.utils import getLogger
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import itertools as it
 
+
+RX_LEAF = re.compile(r"^Tstar_(\d+)_Tdust_(\d+)_tau_([0-9_]+)_thick_([0-9_]+)$")
+
+def make_leaf_and_key(tstar, tdust, tau, thick, ndigits=6):
+    """
+    Canonical naming + canonical float key.
+    """
+
+    tstar_i = int(round(float(tstar)))
+    tdust_i = int(round(float(tdust)))
+    tau_f   = round(float(tau), ndigits)
+    thick_f = round(float(thick), ndigits)
+
+    leaf = (f"Tstar_{tstar_i}_Tdust_{tdust_i}_"
+            f"tau_{tau_f:.{ndigits}g}_thick_{thick_f:.{ndigits}g}").replace('.', '_')
+
+    key = (tstar_i, tdust_i, tau_f, thick_f)
+
+    return leaf, key
+
 def run_single_model(job):
     """Run a single DUSTY model in its own directory and write sed.dat with given parameters."""
     (tstarval, tdustval, tauval, shell_thick_val,
@@ -30,7 +52,7 @@ def run_single_model(job):
     
     base_workdir = Path(base_workdir).resolve()
 
-    leaf = f"Tstar_{int(tstarval)}_Tdust_{int(tdustval)}_tau_{tauval:g}_thick_{shell_thick_val:g}".replace('.', '_')
+    leaf, key = make_leaf_and_key(tstarval, tdustval, tauval, shell_thick_val)
     run_dir = (base_workdir / leaf).resolve() 
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -165,6 +187,8 @@ def main():
                         help="Comma-separated tauV values, e.g. '0.03,0.1,0.3'")
     parser.add_argument("--thick_list", type=str, default=None,
                         help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'")
+    parser.add_argument("--force_rerun", action="store_true",
+                    help="Ignore cache and rerun all models.")
 
     args = parser.parse_args()
 
@@ -175,17 +199,17 @@ def main():
     # -----------------------------
 
     # Stellar temperature (K): cool photosphere range appropriate for your source
-    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000]
+    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000, 6250, 6500, 6750, 7000]
 
     # Inner dust temperature (K): warm silicate near sublimation
-    tdust_values = [800, 850, 900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300]
+    tdust_values = [450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)
-    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 2.0, 3.0, 4.0]
+    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 2.0, 3.0, 3.5, 4.0]
 
     # Thickness (R_out / R_in)
-    shell_thickness_values = [1.2, 1.5, 2.0, 3.0, 5.0]
+    shell_thickness_values = [2.0]
 
     # Overrides from CLI if given
     def _parse_list(s):
@@ -225,7 +249,7 @@ def main():
     # Paths (no chdir)
     # -----------------------------
 
-    workdir = (Path(args.workdir) / f'{dust_label}_thick_grid').resolve()
+    workdir = (Path(args.workdir) / f'{dust_label}_fixed_thick_grid').resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
     dusty_dir_abs = Path(args.dusty_file_dir).resolve()
@@ -234,18 +258,57 @@ def main():
         raise FileNotFoundError(f"Missing DUSTY binary at {dusty_bin}. Build it or fix --dusty_file_dir.")
     os.environ["PATH"] = f"{str(dusty_dir_abs)}:{os.environ.get('PATH','')}"
 
+    # -----------------------------
+    # Check cache
+    # -----------------------------
+    completed = set()
+    
+    if not args.force_rerun:
+        idx_path = Path(workdir) / "model_grid_summary.csv"
+        if idx_path.exists():
+            prev = pd.read_csv(idx_path)
+            prev_ok = prev[(prev["ierror"] == 0) & prev["outpath"].notna()]
+            for _, r in prev_ok.iterrows():
+                _, k = make_leaf_and_key(r["tstar"], r["tdust"], r["tau"], r["shell_thickness"])
+                completed.add(k)
+        else:
+            for sub in workdir.iterdir():
+                if not sub.is_dir():
+                    continue
+                m = RX_LEAF.match(sub.name)
+                if not m:
+                    continue
+                sed_path = sub / "sed.dat"
+                if sed_path.exists():
+                    tstarval = float(m.group(1))
+                    tdustval = float(m.group(2))
+                    tauval = float(m.group(3).replace('_','.'))
+                    shell_thick_val = float(m.group(4).replace('_','.'))
+                    _, k = make_leaf_and_key(tstarval, tdustval, tauval, shell_thick_val)
+                    completed.add(k)
+        logger.info(f"Found {len(completed)} completed models to skip.")
 
     # -----------------------------
     # Parallel grid execution
     # -----------------------------
 
-    jobs = [
+    jobs = []
+    skipped = 0
+
+    for t, d, tv, thick in it.product(tstar_values, tdust_values, tau_values, shell_thickness_values):
+        leaf, key = make_leaf_and_key(t, d, tv, thick)
+        if key in completed:
+            skipped += 1
+            continue
+
+        jobs.append(
         (t, d, tv, thick,
          args, dust_type, blackbody,
          tstarmin, tstarmax, custom_grain_distribution,
          tau_wav_micron, workdir)
-         for t, d, tv, thick in it.product(tstar_values, tdust_values, tau_values, shell_thickness_values)
-    ]
+        )
+
+    logger.info(f"Skipping {skipped} cached models, running {len(jobs)} new ones.")
 
     max_workers = min(os.cpu_count() or 2, 4)
 
