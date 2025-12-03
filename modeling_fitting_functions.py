@@ -1,6 +1,5 @@
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
 import re
 from astropy.io import ascii
 from astropy import constants as const
@@ -25,12 +24,12 @@ class DustyModel:
         self.lamFlam = np.array(lamFlam, float)
 
         # filled after fitting
-        self.scale: Optional[float] = None
-        self.chi2: Optional[float] = None
-        self.dof: Optional[int] = None
-        self.chi2_red: Optional[float] = None
-        self.x_plot: Optional[np.ndarray] = None
-        self.y_scaled: Optional[np.ndarray] = None
+        self.scale = None
+        self.chi2 = None
+        self.dof = None
+        self.chi2_red = None
+        self.x_plot = None
+        self.y_scaled = None
 
 def load_dusty_grid(grid_dir):
     """
@@ -41,7 +40,7 @@ def load_dusty_grid(grid_dir):
     grid_dir = Path(grid_dir)
     rx =  re.compile(r"^Tstar_(\d+)_Tdust_(\d+)_tau_([0-9_]+)_thick_([0-9_]+)$")
 
-    models: List[DustyModel] = []
+    models = []
     for sub in sorted(grid_dir.iterdir()):
         if not sub.is_dir():
             continue
