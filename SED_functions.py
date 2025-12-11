@@ -71,7 +71,7 @@ def _nearest_ul(time_mjd, err_mJy, mjd0, max_dt, n_sigma=3):
 def _sed_has_required_detections(sed, require_wise_detetection=True,
                                  min_detected_bands=2):
     """
-    Keep only SEDs that have at least one *detection* (not UL) in any ZTF band
+    Keep only SEDs that have at least two *detection* (not UL) in any ZTF band
     AND at least one *detection* in any WISE band.
     """
 

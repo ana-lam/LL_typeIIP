@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from SED_functions import plot_sed, _prepare_sed_xy
 import matplotlib.colors as mcolors
+from dusty.dusty_runner import DustyRunner
+from mcmc import compute_scale_and_chi2
 
 # ------------------------------
 # Containers for DUSTY model
@@ -210,7 +212,7 @@ def fit_grid_to_sed(grid_dir, sed, y_mode="Flam", use_weights=True):
         fit_scale_to_sed(m, sed, y_mode=y_mode, use_weights=use_weights)
         rows.append(dict(
             folder=str(m.folder), oid=oid,
-            Tstar=m.Tstar, Tdust=m.Tdust, tau=m.tau,
+            tstar=m.Tstar, tdust=m.Tdust, tau=m.tau,
             scale=m.scale, chi2=m.chi2, dof=m.dof,
             chi2_red=m.chi2_red
         ))
@@ -221,11 +223,13 @@ def fit_grid_to_sed(grid_dir, sed, y_mode="Flam", use_weights=True):
 
     return df
 
-def plot_best_fit_dusty_model(df, sed, y_mode="Flam", top_n=10, keep_sed_limits=False,
+def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=False,
                               y_padding_frac=0.5, logx=True, logy=True, secax=False, 
-                              savepath=None):
+                              savepath=None, mcmc_results=None, dusty_runner=None, 
+                              mcmc_sample_mode="map"):
     """
-    Plot the best N models (after scaling) over the SED.
+    Plot the best N models (after scaling) over the SED and optionally overlay
+    best fit from MCMC results.
     """
 
     # fun color stuff
@@ -257,9 +261,82 @@ def plot_best_fit_dusty_model(df, sed, y_mode="Flam", top_n=10, keep_sed_limits=
             linestyle = '-'
             alpha=1
         m = models[r['folder']]
+        label = (
+                    r"Grid fit: "
+                    rf"$T_*: {m.Tstar}\,\mathrm{{K}},\ "
+                    rf"T_\mathrm{{dust}}: {m.Tdust}\,\mathrm{{K}},\ "
+                    rf"\tau: {m.tau}$ | "
+                    rf"$\chi^2 = {r['chi2']:.1f},\ \chi^2_\mathrm{{red}} = {r['chi2_red']:.2f}$"
+                )
         ax.plot(m.x_plot, m.y_scaled, lw=2, color=palette[i % len(palette)], linestyle=linestyle, alpha=alpha,
-                label=f"T*: {m.Tstar} K, T_dust: {m.Tdust} K, tau: {m.tau}, shell: {m.shell_thickness} | $\\chi^2$={r['chi2']:.2f}, $\\chi^2_\\mathrm{{red}}$={r['chi2_red']:.2f}")
+                label=label)
 
+    # MCMC best fit overlay
+    y_mcmc_scaled = None
+    x_mcmc_plot = None
+    if mcmc_results is not None and dusty_runner is not None:
+        samples = mcmc_results['samples']
+        logp = mcmc_results['log_prob']
+
+        if mcmc_sample_mode == "median":
+            # medians across posterior
+            tstar_m = np.median(samples[:, 0])
+            tdust_m = np.median(samples[:, 1])
+            log10_tau_m = np.median(samples[:, 2])
+        else:
+            # maximum a posteriori
+            max_idx = np.argmax(logp)
+            tstar_m = samples[max_idx, 0]
+            tdust_m = samples[max_idx, 1]
+            log10_tau_m = samples[max_idx, 2]
+        
+        tau_m = 10.0**log10_tau_m
+        lam_um_m, lamFlam_m, r1_m = dusty_runner.evaluate_model(tstar_m, tdust_m, tau_m)
+        
+        if lam_um_m is not None:
+            # get analytic scale and chi^2 in the same way as grid models
+            scale_m, chi2_m = compute_scale_and_chi2(
+                lam_um_m, lamFlam_m, sed, y_mode=y_mode, use_weights=True
+            )
+
+            if np.isfinite(chi2_m):
+                if y_mode == "Flam":
+                    x_mcmc_plot = lam_um_m
+                    y_mcmc_scaled = scale_m * lamFlam_m
+                elif y_mode == "Fnu":
+                    lam_cm_m = lam_um_m * 1e-4
+                    nu_m = const.c.cgs.value / lam_cm_m
+                    Fnu_m = lamFlam_m * (lam_cm_m / const.c.cgs.value)
+
+                    order = np.argsort(nu_m)
+                    nu_m = nu_m[order]
+                    Fnu_m = Fnu_m[order]
+
+                    x_mcmc_plot = nu_m
+                    y_mcmc_scaled = scale_m * Fnu_m
+
+                def q16_50_84(x):
+                    q16, q50, q84 = np.percentile(x, [16, 50, 84])
+                    return q50, q50 - q16, q84 - q50   # median, -err, +err
+
+                T_med,  T_m_err,  T_p_err  = q16_50_84(mcmc_results["tstar"])
+                Td_med, Td_m_err, Td_p_err = q16_50_84(mcmc_results["tdust"])
+                tau_med, tau_m_err, tau_p_err = q16_50_84(mcmc_results["tau"])
+
+                N_data = len(sed["lam"])  # or however many SED points you actually use
+                chi2_red_m = chi2_m / max(N_data - 1, 1)
+
+                label = (
+                    r"MCMC fit: "
+                    rf"$T_*: {T_med:.0f}_{{-{T_m_err:.0f}}}^{{+{T_p_err:.0f}}}\,\mathrm{{K}},\ "
+                    rf"T_\mathrm{{dust}}: {Td_med:.0f}_{{-{Td_m_err:.0f}}}^{{+{Td_p_err:.0f}}}\,\mathrm{{K}},\ "
+                    rf"\tau: {tau_med:.2f}_{{-{tau_m_err:.2f}}}^{{+{tau_p_err:.2f}}}$ | "
+                    rf"$\chi^2 = {chi2_m:.1f},\ \chi^2_\mathrm{{red}} = {chi2_red_m:.2f}$"
+                )
+                
+                ax.plot(x_mcmc_plot, y_mcmc_scaled, 
+                        lw=2, color="deeppink", linestyle='-', alpha=1,
+                        label=label)
     # SED data
     plot_sed(sed, ax=ax, y_mode=y_mode, logx=logx, logy=logy, secax=secax, savepath=None)
 
