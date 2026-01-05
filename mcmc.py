@@ -1,9 +1,12 @@
+import os
 import numpy as np
 import emcee
+from multiprocessing import get_context
 from pydusty.dusty import Dusty
 from SED_functions import _prepare_sed_xy 
 from dusty.dusty_runner import DustyRunner
 from astropy import constants as const
+from bol_utils import integrate_Fbol_from_lamFlam, Fbol_to_Lbol, MNi_from_tail
 
 def compute_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """
@@ -148,11 +151,12 @@ def log_probability(theta, sed, dusty_runner, prior_config, y_mode="Flam"):
 
 def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir, 
                      dust_type="silicate", shell_thickness=2.0,
-                     nwalkers=32, nsteps=2000, burn_in=500, y_mode="Flam",
-                     random_seed=42):
+                     nwalkers=20, nsteps=2000, burn_in=500, y_mode="Flam",
+                     n_cores=None, random_seed=42):
     """
     Run emcee for a given SED using DUSTY models.
     """
+
     np.random.seed(random_seed)
 
     dusty_runner = DustyRunner(base_workdir=workdir,
@@ -194,12 +198,26 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             p0[k, 1] = np.random.uniform(*prior_config["tdust_bounds"])
             p0[k, 2] = np.random.uniform(*prior_config["log10_tau_bounds"])
     
-    sampler = emcee.EnsembleSampler(nwalkers,
-                                    ndim,
-                                    log_probability,
-                                    args=(sed, dusty_runner, prior_config, y_mode))
-    print(f"Running MCMC: nwalkers={nwalkers}, nsteps={nsteps}...")
-    sampler.run_mcmc(p0, nsteps, progress=True)
+
+    if n_cores is None:
+        ncores = min(os.cpu_count() or 1, nwalkers) # don't exceed specified nwalkers
+    
+    ctx = get_context("fork")
+
+    with ctx.Pool(processes=ncores) as pool:
+        sampler = emcee.EnsembleSampler(
+            nwalkers, ndim, log_probability,
+            args=(sed, dusty_runner, prior_config, y_mode),
+            pool=pool
+        )
+        sampler.run_mcmc(p0, nsteps, progress=True)
+
+    # sampler = emcee.EnsembleSampler(nwalkers,
+    #                                 ndim,
+    #                                 log_probability,
+    #                                 args=(sed, dusty_runner, prior_config, y_mode))
+    # print(f"Running MCMC: nwalkers={nwalkers}, nsteps={nsteps}...")
+    # sampler.run_mcmc(p0, nsteps, progress=True)
 
     # discard burn-in and flatten
     samples = sampler.get_chain(discard=burn_in, thin=1, flat=True)
@@ -225,3 +243,52 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     )
 
     return results
+
+def posterior_Lbol_MNi(mcmc_results, dusty_runner, z,
+                       t_days, max_draws=500, seed=42):
+    """
+    Convert MCMC posterior samples into posterior samples of F_bol, L_bol, and M_Ni.
+    """
+
+    rng = np.random.default_rng(seed)
+    samples = mcmc_results["samples"]
+    logp = mcmc_results["log_prob"]
+
+    n = samples.shape[0]
+    if n == 0:
+        raise ValueError("No samples in mcmc_results.")
+
+    if (max_draws is not None) and (n > max_draws):
+        idx = rng.choice(n, size=max_draws, replace=False)
+        samples = samples[idx]
+        logp = logp[idx]
+
+    Fbol = np.full(len(samples), np.nan, float)
+    Lbol = np.full(len(samples), np.nan, float)
+    MNi = np.full(len(samples), np.nan, float)
+
+    for i, th in enumerate(samples):
+        tstar, tdust, tau, a = th
+        lam_um, lamFlam, r1 = dusty_runner.evaluate_model(tstar, tdust, tau)
+
+        if lam_um is None:
+            continue
+
+        # scale
+        lamFlam_scaled = a * lamFlam
+
+        # integrate to get F_bol
+        F_bol = integrate_Fbol_from_lamFlam(lam_um, lamFlam_scaled)
+        L_bol = Fbol_to_Lbol(F_bol, z)
+        M_Ni = MNi_from_tail(L_bol, t_days)
+
+        Fbol[i] = F_bol
+        Lbol[i] = L_bol
+        MNi[i] = M_Ni
+
+    return dict(
+        Fbol=Fbol,
+        Lbol=Lbol,
+        MNi=MNi,
+        log_prob=logp
+    )

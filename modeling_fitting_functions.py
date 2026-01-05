@@ -262,11 +262,19 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
             linestyle = '-'
             alpha=1
         m = models[r['folder']]
+
+        # for nice formatting
+
+        exp = int(np.floor(np.log10(abs(m.scale))))
+        a0 = m.scale / 10**exp
+
         label = (
-                    r"Grid fit: "
-                    rf"$T_*: {m.Tstar}\,\mathrm{{K}},\ "
+                    r"Grid: "
+                    rf"$T*: {m.Tstar}\,\mathrm{{K}},\ "
                     rf"T_\mathrm{{dust}}: {m.Tdust}\,\mathrm{{K}},\ "
-                    rf"\tau: {m.tau}$ | "
+                    rf"\tau: {m.tau},$"
+                    "\n"
+                    rf"$a: {a0:.1f}\times10^{{{exp}}} \ $ "
                     rf"$\chi^2 = {r['chi2']:.1f},\ \chi^2_\mathrm{{red}} = {r['chi2_red']:.2f}$"
                 )
         ax.plot(m.x_plot, m.y_scaled, lw=2, color=palette[i % len(palette)], linestyle=linestyle, alpha=alpha,
@@ -326,15 +334,24 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
                 T_med,  T_m_err,  T_p_err  = q16_50_84(mcmc_results["tstar"])
                 Td_med, Td_m_err, Td_p_err = q16_50_84(mcmc_results["tdust"])
                 tau_med, tau_m_err, tau_p_err = q16_50_84(mcmc_results["tau"])
+                a_med, a_m_err, a_p_err = q16_50_84(mcmc_results["a"])
+
+                # for nice formatting
+                exp = int(np.floor(np.log10(abs(a_med))))
+                a0 = a_med / 10**exp
+                a0_m = a_m_err / 10**exp
+                a0_p = a_p_err / 10**exp
 
                 N_data = len(sed["lam"])  # or however many SED points you actually use
                 chi2_red_m = chi2_m / max(N_data - 1, 1)
 
                 label = (
-                    r"MCMC fit: "
-                    rf"$T_*: {T_med:.0f}_{{-{T_m_err:.0f}}}^{{+{T_p_err:.0f}}}\,\mathrm{{K}},\ "
+                    r"MCMC: "
+                    rf"$T*: {T_med:.0f}_{{-{T_m_err:.0f}}}^{{+{T_p_err:.0f}}}\,\mathrm{{K}},\ "
                     rf"T_\mathrm{{dust}}: {Td_med:.0f}_{{-{Td_m_err:.0f}}}^{{+{Td_p_err:.0f}}}\,\mathrm{{K}},\ "
-                    rf"\tau: {tau_med:.2f}_{{-{tau_m_err:.2f}}}^{{+{tau_p_err:.2f}}}$ | "
+                    rf"\tau: {tau_med:.2f}_{{-{tau_m_err:.2f}}}^{{+{tau_p_err:.2f}}},$"
+                    "\n"
+                    rf"$a = {a0:.1f}_{{-{a0_m:.1f}}}^{{+{a0_p:.1f}}}\times10^{{{exp}}} \ $"
                     rf"$\chi^2 = {chi2_m:.1f},\ \chi^2_\mathrm{{red}} = {chi2_red_m:.2f}$"
                 )
                 
