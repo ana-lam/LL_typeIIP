@@ -242,6 +242,7 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
     def _darken(rgb, t):
         """t in [0,1]; 0 = original, 1 = black"""
         return tuple((1 - t)*c for c in rgb)
+    
     N = top_n
     palette = ([_darken(base, t)  for t in np.linspace(0.0, 0.75, N//2)] +
            [_lighten(base, t) for t in np.linspace(0.0, 0.75, N - N//2)])
@@ -283,20 +284,23 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
             tstar_m = np.median(samples[:, 0])
             tdust_m = np.median(samples[:, 1])
             log10_tau_m = np.median(samples[:, 2])
+            log10_a_m = np.median(samples[:, 3])
         else:
             # maximum a posteriori
             max_idx = np.argmax(logp)
             tstar_m = samples[max_idx, 0]
             tdust_m = samples[max_idx, 1]
             log10_tau_m = samples[max_idx, 2]
+            log10_a_m = samples[max_idx, 3]
         
         tau_m = 10.0**log10_tau_m
+        a_m = 10.0**log10_a_m
         lam_um_m, lamFlam_m, r1_m = dusty_runner.evaluate_model(tstar_m, tdust_m, tau_m)
         
         if lam_um_m is not None:
             # get analytic scale and chi^2 in the same way as grid models
             scale_m, chi2_m = compute_scale_and_chi2(
-                lam_um_m, lamFlam_m, sed, y_mode=y_mode, use_weights=True
+                lam_um_m, lamFlam_m, sed, a=a_m, y_mode=y_mode, use_weights=True
             )
 
             if np.isfinite(chi2_m):

@@ -16,3 +16,6 @@ dusty/dusty_run_test/
 dustmaps_data/
 __pycache__/
 .vscode/
+model_fit_plots/
+model_fit_plots_fixed_thick/
+dusty/mcmc_test_workdir/

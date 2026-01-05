@@ -1,4 +1,6 @@
 import os
+import io
+import contextlib
 import shutil
 import stat
 from pathlib import Path
@@ -6,6 +8,27 @@ import numpy as np
 from pydusty.dusty import Dusty, DustyParameters
 from pydusty.parameters import Parameter
 from astropy.io import ascii
+
+@contextlib.contextmanager
+def silence_fds():
+    """
+    Temporarily redirect low-level file descriptors 1 (stdout) and 2 (stderr)
+    to /dev/null. This catches output from C/Fortran/child processes that
+    bypass Python's sys.stdout/sys.stderr.
+    """
+    devnull_fd = os.open(os.devnull, os.O_RDWR)
+    saved_stdout = os.dup(1)
+    saved_stderr = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(saved_stdout, 1)
+        os.dup2(saved_stderr, 2)
+        os.close(devnull_fd)
+        os.close(saved_stdout)
+        os.close(saved_stderr)
 
 class DustyRunner:
     """
@@ -15,7 +38,7 @@ class DustyRunner:
     def __init__(self, base_workdir, dusty_file_dir,
                  dust_type="silicate", shell_thickness=2.0,
                  tstarmin=2000., tstarmax=12000., custom_grain_distribution=False,
-                 tau_wavelength_microns=0.55, blackbody=True, logger=None):
+                 tau_wavelength_microns=0.55, blackbody=True, logger=None, quiet=True):
         self.base_workdir = Path(base_workdir).resolve()
         self.base_workdir.mkdir(parents=True, exist_ok=True)
 
@@ -34,6 +57,7 @@ class DustyRunner:
 
         self._cache = {}   # (tstar, tdust, tau, shell_thickness) -> (lam_um, lamFlam, r1)
         self.logger = logger
+        self.quiet = quiet
 
     @staticmethod
     def _make_leaf(tstar, tdust, tau, shell_thickness, ndigits=6):
@@ -124,12 +148,14 @@ class DustyRunner:
             return lam_um, lamFlam, r1
         
         # run DUSTY
-        dusty_params = self._build_parameters(*key)
-        runner = Dusty(
-            parameters=dusty_params,
-            dusty_working_directory=str(run_dir),
-            dusty_file_directory=self.dusty_file_dir,
-        )
+        # Silence all OS-level stdout/stderr from DUSTY & friends
+        with silence_fds():
+            dusty_params = self._build_parameters(*key)
+            runner = Dusty(
+                parameters=dusty_params,
+                dusty_working_directory=str(run_dir),
+                dusty_file_directory=self.dusty_file_dir,
+            )
 
         # ensure DUSTY binary is present & executable
         dst = run_dir / "dusty"
@@ -145,15 +171,15 @@ class DustyRunner:
         try:
             os.chdir(str(run_dir))
             os.environ["PATH"] = f"{str(run_dir)}:{str(Path(self.dusty_file_dir).resolve())}:{os.environ.get('PATH','')}"
-            print("generating input...")
+
             runner.generate_input()
-            print("running dusty...")
             runner.run()
-            print("ran dusty, getting results...")
             lam, flx, npt, r1, ierror = runner.get_results()
+
         except Exception as e:
             os.chdir(prev_cwd)
-            print(f"Error running DUSTY in {run_dir}: {e}")
+            if self.logger:
+                self.logger.error(f"Error running DUSTY in {run_dir}: {e}")
             self._cache[key] = (None, None, None)
             return None, None, None
         

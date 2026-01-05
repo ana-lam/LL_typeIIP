@@ -3,8 +3,9 @@ import emcee
 from pydusty.dusty import Dusty
 from SED_functions import _prepare_sed_xy 
 from dusty.dusty_runner import DustyRunner
+from astropy import constants as const
 
-def compute_scale_and_chi2(lam_um, lamFlam, sed, y_mode="Flam", use_weights=True):
+def compute_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """
     Analytic best-fit scale + chi^2.
     """
@@ -14,7 +15,6 @@ def compute_scale_and_chi2(lam_um, lamFlam, sed, y_mode="Flam", use_weights=True
         x_mod = lam_um
         y_mod = lamFlam
     elif y_mode == "Fnu":
-        from astropy import constants as const
         lam_cm = lam_um * 1e-4
         nu_mod = const.c.cgs.value / lam_cm
         Fnu_mod = lamFlam * (lam_cm / const.c.cgs.value)
@@ -33,13 +33,23 @@ def compute_scale_and_chi2(lam_um, lamFlam, sed, y_mode="Flam", use_weights=True
 
     y_mod_on_data = np.interp(x_data, x_mod, y_mod)
 
-    if use_weights and np.any(ey_data > 0):
-        weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
-        a = np.sum(weights * y_data * y_mod_on_data) / np.sum(weights * y_mod_on_data**2)
-        chi2 = np.sum(weights * (y_data - a*y_mod_on_data)**2)
+    if a is not None:
+        # fixed scale from MCMC
+        model = a * y_mod_on_data
+        if use_weights and np.any(ey_data > 0):
+            weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
+            chi2 = float(np.sum(weights * (y_data - model)**2))
+        else:
+            chi2 = float(np.sum((y_data - model)**2))
+
     else:
-        a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data**2)
-        chi2 = np.sum((y_data - a*y_mod_on_data)**2)
+        if use_weights and np.any(ey_data > 0):
+            weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
+            a = np.sum(weights * y_data * y_mod_on_data) / np.sum(weights * y_mod_on_data**2)
+            chi2 = np.sum(weights * (y_data - a*y_mod_on_data)**2)
+        else:
+            a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data**2)
+            chi2 = np.sum((y_data - a*y_mod_on_data)**2)
 
     N = len(y_data)
     dof = max(N-1, 0)
@@ -50,20 +60,27 @@ def compute_scale_and_chi2(lam_um, lamFlam, sed, y_mode="Flam", use_weights=True
     
     return float(a), float(chi2)
 
+
 def log_likelihood(theta, sed, dusty_runner,
                    y_mode="Flam", use_weights=True):
     """
-    theta = (tstar, tdust, log10_tau)
+    theta = (tstar, tdust, log10_tau, log10_a)
     """
-    tstar, tdust, log10_tau = theta
-    tau = 10.0**log10_tau
+    if len(theta) != 4:
+        tstar, tdust, log10_tau = theta
+        tau = 10.0**log10_tau
+        a = None
+    else:
+        tstar, tdust, log10_tau, log10_a = theta
+        tau = 10.0**log10_tau
+        a = 10.0**log10_a
 
     lam_um, lamFlam, r1 = dusty_runner.evaluate_model(tstar, tdust, tau)
 
     if lam_um is None:
         return -np.inf
 
-    scale, chi2 = compute_scale_and_chi2(lam_um, lamFlam, sed,
+    scale, chi2 = compute_scale_and_chi2(lam_um, lamFlam, sed, a=a,
                                          y_mode=y_mode,
                                          use_weights=use_weights)
     if not np.isfinite(chi2):
@@ -74,12 +91,18 @@ def log_likelihood(theta, sed, dusty_runner,
 def log_prior(theta, tstar_bounds=(2000., 12000.),
                       tdust_bounds=(100., 1500.),
                       log10_tau_bounds=(-4., 2.),
-                      best=None, gauss_frac=None):
+                      log10_a_bounds=(-30., 30.),
+                      best=None, gauss_frac=None,
+                      a_prior_sigma_dex=None):
     """
     theta = (tstar, tdust, log10_tau)
     If best and gauss_frac are provided, use a Gaussian prior centered on best
     """
-    tstar, tdust, log10_tau = theta
+    if len(theta) != 4:
+        tstar, tdust, log10_tau = theta
+        log10_a = None
+    else:
+        tstar, tdust, log10_tau, log10_a = theta
     
     if not (tstar_bounds[0] <= tstar <= tstar_bounds[1]):
         return -np.inf
@@ -88,6 +111,10 @@ def log_prior(theta, tstar_bounds=(2000., 12000.),
     if not (log10_tau_bounds[0] <= log10_tau <= log10_tau_bounds[1]):
         return -np.inf
     
+    if log10_a is not None:
+        if not (log10_a_bounds[0] <= log10_a <= log10_a_bounds[1]):
+            return -np.inf
+    
     lp = 0.0
 
     if best is not None and gauss_frac is not None:
@@ -95,12 +122,18 @@ def log_prior(theta, tstar_bounds=(2000., 12000.),
         sig_tdust = gauss_frac.get("tdust", 0.0) * best["tdust"]
         sig_log10_tau = gauss_frac.get("log10_tau", 0.0)
 
+        if log10_a is not None:
+            sig_log10_a = gauss_frac.get("log10_a", 0.0) 
+
         if sig_tstar > 0:
             lp += -0.5 * ((tstar - best["tstar"])/sig_tstar)**2
         if sig_tdust > 0:
             lp += -0.5 * ((tdust - best["tdust"])/sig_tdust)**2
         if sig_log10_tau > 0:
             lp += -0.5 * ((log10_tau - best["log10_tau"])/sig_log10_tau)**2
+    
+    if best is not None and (log10_a is not None) and (a_prior_sigma_dex is not None):
+        lp += -0.5 * ((log10_a - best["log10_a"])/a_prior_sigma_dex)**2
 
     return lp
 
@@ -132,7 +165,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     best = {
         "tstar": float(best_row["tstar"]),
         "tdust": float(best_row["tdust"]),
-        "log10_tau": np.log10(float(best_row["tau"]))
+        "log10_tau": np.log10(float(best_row["tau"])),
+        "log10_a": np.log10(float(best_row["scale"]))
     }
 
     # prior configuration
@@ -141,15 +175,17 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         tdust_bounds=(100., 1500.),
         log10_tau_bounds=(-4., 2.),
         best=best,
-        gauss_frac={"tstar": 0.3, "tdust": 0.5, "log10_tau": 0.5} # 30%, 50%, 50%
+        gauss_frac={"tstar": 0.3, "tdust": 0.5, "log10_tau": 0.5}, # 30%, 50%, 50%
+        a_prior_sigma_dex=1.0
     )
 
     # initial positions from best
-    ndim = 3 # tstar, tdust, log10_tau
+    ndim = 4 # tstar, tdust, log10_tau, log10_a
     p0 = np.zeros((nwalkers, ndim))
     p0[:, 0] = best["tstar"] * (1.0 + 0.1 * np.random.randn(nwalkers))
     p0[:, 1] = best["tdust"] * (1.0 + 0.1 * np.random.randn(nwalkers))
     p0[:, 2] = best["log10_tau"] + 0.2 * np.random.randn(nwalkers)
+    p0[:, 3] = best["log10_a"] + 0.2 * np.random.randn(nwalkers)
     
     for k in range(nwalkers):
         lp = log_prior(p0[k], **prior_config)
@@ -173,7 +209,9 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     tstar_samples = samples[:, 0]
     tdust_samples = samples[:, 1]
     log10_tau_samples = samples[:, 2]
+    log10_a_samples = samples[:, 3]
     tau_samples = 10.0**log10_tau_samples
+    a_samples = 10.0**log10_a_samples
 
     results = dict(
         samples=samples,
@@ -181,7 +219,9 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         tstar=tstar_samples,
         tdust=tdust_samples,
         tau=tau_samples,
-        grid_best=best
+        a=a_samples,
+        grid_best=best,
+        sampler=sampler
     )
 
     return results
