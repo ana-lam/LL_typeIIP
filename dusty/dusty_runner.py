@@ -118,6 +118,7 @@ class DustyRunner:
             shell_thickness = self.shell_thickness_fixed
 
         key = (float(tstar), float(tdust), float(tau), float(shell_thickness))
+
         if key in self._cache:
             return self._cache[key]
         
@@ -170,7 +171,7 @@ class DustyRunner:
         prev_cwd = os.getcwd()
         try:
             os.chdir(str(run_dir))
-            os.environ["PATH"] = f"{str(run_dir)}:{str(Path(self.dusty_file_dir).resolve())}:{os.environ.get('PATH','')}"
+            # os.environ["PATH"] = f"{str(run_dir)}:{str(Path(self.dusty_file_dir).resolve())}:{os.environ.get('PATH','')}"
 
             runner.generate_input()
             runner.run()
