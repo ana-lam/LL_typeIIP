@@ -1,4 +1,3 @@
-
 snr:
   min: 3.0
   min_wise: 2.0 # minimum SNR for WISE detection (more relaxed)
@@ -29,6 +28,7 @@ sed_plot:
   
   size: 20
 
+
 extinction:
   r_v: 3.1 # Milky Way R_V (Cardelli 1989)
   sf11_scale: 0.86 # Schlafly & Finkbeiner 2011 scaling
@@ -37,9 +37,18 @@ extinction:
     ZTF_r: 0.828 # 2.271 / 2.742
     ZTF_i: 0.613 # 1.682 / 2.742
 
+
 dustmaps:
   data_dir: "data/dustmaps"  
   sfd_dir: "data/dustmaps/sfd"
+
+
+dusty:
+  # Path to DUSTY binary (linux) and data files (external installation)
+  dusty_file_dir: "/home/cal/analam/Documents/dusty/releaseV2"
+  # Base directory for DUSTY model runs (within project)
+  workdir: "dusty_runs"
+
 
 paths:
   data_dir: "data"
