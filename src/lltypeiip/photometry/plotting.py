@@ -1,9 +1,11 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.collections as mcoll
 from astropy.stats import sigma_clipped_stats
+from pathlib import Path
 
-from ..config import SED_COLORS, SED_MARKERS
+from ..config import config, SED_COLORS, SED_MARKERS
 from .extinction import calculate_distance_modulus
 from .wise import subtract_wise_parity_baseline
 from .ztf import convert_ZTF_mag_mJy
@@ -590,6 +592,8 @@ def plot_forced_lc_abs_app(
                 ax_abs = ax.twinx()
 
                 # --- Get distance modulus + extinction ---
+                meta_path = Path(config.paths.zenodo_meta)
+                meta = pd.read_csv(meta_path)
                 meta_row = meta[meta["name"] == oid]
                 if not meta_row.empty:
                     z = meta_row["redshift"].values[0]
