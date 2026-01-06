@@ -1,28 +1,40 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from astropy import units as u
-import astropy.constants as const
-from lc_plotting_functions import subtract_wise_parity_baseline
 import pandas as pd
+import astropy.constants as const
 
-# effective wavelengths [Angstrom]
-lam_eff = {
-    "ZTF_g": 4770.0,
-    "ZTF_r": 6231.0,
-    "ZTF_i": 7625.0,
-    "W1": 34000.0,
-    "W2": 46000.0,
-}
-
-SNR_MIN = 3.0 # minimum SNR for a detection
-SNR_MIN_WISE = 2.0 # minimum SNR for a WISE detection (slightly more relaxed)
-
-SED_COLORS  = {"ZTF_g":"green", "ZTF_r":"red", "ZTF_i":"orange", "W1":"navy", "W2":"dodgerblue"}
-SED_MARKERS = {"ZTF_g":"o", "ZTF_r":"X", "ZTF_i":"D", "W1":"s", "W2":"s"}
-SED_SIZE = 20  # dot area
+from ..config import config, SNR_MIN, SNR_MIN_WISE, LAM_EFF
+from ..photometry.wise import subtract_wise_parity_baseline
 
 
-# --- Helper functions for selecting nearest points and building SEDs ---
+def _merge_epochs(times, merge_dt=1.0):
+    """
+    Merge epochs that are within merge_dt days of each other.
+    """
+    if len(times) == 0:
+        return np.array([])
+    times = np.sort(times)
+    groups = [[times[0]]]
+    for x in times[1:]:
+        if x - groups[-1][-1] <= merge_dt:
+            groups[-1].append(x)
+        else:
+            groups.append([x])
+    
+    reps = [np.median(g) for g in groups]
+    return np.array(reps)
+
+
+def _det_times(times, fluxes, errs, snr_threshold):
+    """
+    Find detection times based on SNR threshold.
+    """
+    t = np.asarray(times, float)
+    f = np.asarray(fluxes, float)
+    e = np.asarray(errs, float)
+    ok = np.isfinite(t) & np.isfinite(f) & np.isfinite(e) & (e > 0) & (f > 0) & ((f / e) >= snr_threshold)
+    return t[ok]
+
+
 def _pick_nearest(time_mjd, val_mJy, err_mJy, mjd0, max_dt, snr_min=SNR_MIN,
                   band=None, snr_min_wise=None, require_positive_flux=True):
     """
@@ -55,6 +67,7 @@ def _pick_nearest(time_mjd, val_mJy, err_mJy, mjd0, max_dt, snr_min=SNR_MIN,
             return (time_mjd[k], f, e)
 
     return None
+
 
 def _nearest_ul(time_mjd, err_mJy, mjd0, max_dt, n_sigma=3):
     """
@@ -96,52 +109,51 @@ def _sed_has_required_detections(sed, require_wise_detetection=True,
         return any_detection and any_ztf_det and any_wise_det and (n_det_bands >= min_detected_bands)
     else:
         return any_detection and any_ztf_det and (n_det_bands >= min_detected_bands)
-
+    
 # --- Build SEDs after tail-onset using tail start from CSV -----
 def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0, 
                                      max_dt_wise=1.0, include_limits=True, snr_min=SNR_MIN,
-                                     snr_min_wise=SNR_MIN_WISE, csv_path="data/TableA_full_machine_readable_params.csv",
+                                     snr_min_wise=SNR_MIN_WISE, csv_path=config.paths.params,
                                      tail_offset_days=0.0, merge_dt=4.0, require_wise_detection=False,
                                      min_detected_bands=2, include_plateau_epoch=True):
     """
     Build SEDs for any epochs **after plateau end** that have >= `min_detected_bands`
     detections (regardless of whether they are ZTF or WISE).
 
+    Parameters
+    ----------
+    ztf_resdict : dict
+        ZTF results dictionary from get_ztf_lc_data().
+    wise_resdict : dict
+        WISE results dictionary from get_wise_lc_data().
+    max_dt_ztf : float, optional
+        Maximum time separation (days) for ZTF measurements. Default 4.0.
+    max_dt_wise : float, optional
+        Maximum time separation (days) for WISE measurements. Default 1.0.
+    include_limits : bool, optional
+        Whether to include upper limits in SEDs. Default True.
+    snr_min : float, optional
+        Minimum SNR for ZTF detections. If None, uses config.snr.min.
+    snr_min_wise : float, optional
+        Minimum SNR for WISE detections. If None, uses config.snr.min_wise.
+    csv_path : str or Path, optional
+        Path to parameters CSV file. If None, uses config.paths.params.
+    tail_offset_days : float, optional
+        Offset in days to apply to tail start time. Default 0.0.
+    merge_dt : float, optional
+        Merge epochs within this separation (days). Default 4.0.
+    require_wise_detection : bool, optional
+        If True, only build SEDs anchored on WISE detections. Default False.
+    min_detected_bands : int, optional
+        Minimum number of bands with detections. Default 2.
+    include_plateau_epoch : bool, optional
+        If True, include an SED at plateau end time. Default True.
+
     Returns
     -------
-    list of SED dicts (same schema as build_sed)
+    list of dict
+        List of SED dictionaries (same schema as build_sed).
     """
-
-    # Because we loop over WISE detections, we can yield the same epoch so let's dedup
-    def _merge_epochs(times, merge_dt=1.0):
-        """
-        Merge epochs that are within merge_dt days of each other.
-        """
-
-        if len(times) == 0:
-            return np.array([])
-        times = np.sort(times)
-        groups = [[times[0]]]
-        for x in times[1:]:
-            if x - groups[-1][-1] <= merge_dt:
-                groups[-1].append(x)
-            else:
-                groups.append([x])
-
-        reps = [np.median(g) for g in groups]
-
-        return np.array(reps)
-    
-    def _det_times(times, fluxes, errs, snr_threshold):
-        """
-        Find detection times based on SNR threshold.
-        """
-        t = np.asarray(times, float)
-        f = np.asarray(fluxes, float)
-        e = np.asarray(errs, float)
-        ok = np.isfinite(t) & np.isfinite(f) & np.isfinite(e) & (e > 0) & (f > 0) & ((f / e) >= snr_threshold)
-        
-        return t[ok]
 
     oid = ztf_resdict.get("oid")
     ztf_forced = ztf_resdict['forced']
@@ -221,28 +233,29 @@ def build_multi_epoch_seds(ztf_resdict, wise_resdict, max_dt_ztf=5.0, max_dt_wis
     """
     Build SEDs for all WISE epochs after the ZTF SN peak,
     requiring ZTF+WISE coverage within a 5-day window.
+    
+    Parameters
+    ----------
+    ztf_resdict : dict
+        ZTF results dictionary from get_ztf_lc_data().
+    wise_resdict : dict
+        WISE results dictionary from get_wise_lc_data().
+    max_dt_ztf : float, optional
+        Maximum time separation (days) for ZTF measurements. Default 5.0.
+    max_dt_wise : float, optional
+        Maximum time separation (days) for WISE measurements. Default 5.0.
+    include_limits : bool, optional
+        Whether to include upper limits in SEDs. Default True.
+    snr_min : float, optional
+        Minimum SNR for ZTF detections. If None, uses config.snr.min.
+    snr_min_wise : float, optional
+        Minimum SNR for WISE detections. If None, uses config.snr.min_wise.
+    
+    Returns
+    -------
+    list of dict
+        List of SED dictionaries.
     """
-
-    # Because we loop over WISE detections, we can yield the same epoch so let's dedup
-    def _merge_epochs(times, merge_dt=1.0):
-        """
-        Merge epochs that are within merge_dt days of each other.
-        """
-
-        if len(times) == 0:
-            return np.array([])
-        times = np.sort(times)
-        groups = [[times[0]]]
-        for x in times[1:]:
-            if x - groups[-1][-1] <= merge_dt:
-                groups[-1].append(x)
-            else:
-                groups.append([x])
-
-        reps = [np.median(g) for g in groups]
-
-        return np.array(reps)
-
 
     ztf_forced = ztf_resdict['forced']
 
@@ -258,15 +271,9 @@ def build_multi_epoch_seds(ztf_resdict, wise_resdict, max_dt_ztf=5.0, max_dt_wis
         wise_resdict, clip_negatives=False, dt=200.0,
         rescale_uncertainties=True, sigma_clip=3.0
     )
-
-    # helper: keep only real detections per (relaxed) WISE threshold
-    def _good_times(times, fluxes, errs, thr):
-        t = np.asarray(times, float); f = np.asarray(fluxes, float); e = np.asarray(errs, float)
-        ok = np.isfinite(t) & np.isfinite(f) & np.isfinite(e) & (e > 0) & (f > 0) & (f/e >= thr)
-        return t[ok]
     
-    w1_t = _good_times(w.get("b1_times", []), w.get("b1_fluxes", []), w.get("b1_fluxerrs", []), snr_min_wise)
-    w2_t = _good_times(w.get("b2_times", []), w.get("b2_fluxes", []), w.get("b2_fluxerrs", []), snr_min_wise)
+    w1_t = _det_times(w.get("b1_times", []), w.get("b1_fluxes", []), w.get("b1_fluxerrs", []), snr_min_wise)
+    w2_t = _det_times(w.get("b2_times", []), w.get("b2_fluxes", []), w.get("b2_fluxerrs", []), snr_min_wise)
 
     all_epochs = np.unique(np.concatenate([w1_t[w1_t > t_peak], w2_t[w2_t > t_peak]]))
     all_epochs = _merge_epochs(all_epochs)
@@ -287,9 +294,31 @@ def build_multi_epoch_seds(ztf_resdict, wise_resdict, max_dt_ztf=5.0, max_dt_wis
 def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0, 
               include_limits=True, snr_min=SNR_MIN, snr_min_wise=SNR_MIN_WISE):
     """
-    ztf_forced: dict with keys "ZTF_g/r/i" each containing arrays:
-        'mjd', 'flux_mJy', 'flux_err_mJy' (numbers)
-    wise_resdict: output of your WISE parser (numbers in mJy)
+    Build a single-epoch SED from ZTF and WISE photometry.
+    
+    Parameters
+    ----------
+    mjd0 : float
+        Reference epoch (MJD) for the SED.
+    ztf_resdict : dict
+        ZTF results dictionary with 'forced' key containing photometry.
+    wise_resdict : dict
+        WISE results dictionary from get_wise_lc_data().
+    max_dt_ztf : float, optional
+        Maximum time separation (days) for ZTF measurements. Default 1.0.
+    max_dt_wise : float, optional
+        Maximum time separation (days) for WISE measurements. Default 1.0.
+    include_limits : bool, optional
+        Whether to include upper limits. Default True.
+    snr_min : float, optional
+        Minimum SNR for ZTF detections. If None, uses config.snr.min.
+    snr_min_wise : float, optional
+        Minimum SNR for WISE detections. If None, uses config.snr.min_wise.
+    
+    Returns
+    -------
+    dict
+        SED dictionary with keys: mjd, oid, bands, nu, lam, Fnu, eFnu, is_ul, dt_labels.
     """
 
     sed = {
@@ -328,8 +357,8 @@ def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0,
             snr_min=snr_min, band=band,
             snr_min_wise=snr_min_wise
         )
-        lam = lam_eff[band]
-        nu = (const.c.value / (lam * 1e-10)) # Hz
+        lam = LAM_EFF[band]
+        nu = (const.c.value / (lam * 1e-10))  # Hz
         if tsel:
             t, f, e = tsel
             sed["bands"].append(band)
@@ -359,8 +388,8 @@ def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0,
         errs = np.asarray(w[ekey], dtype=float)
         tsel = _pick_nearest(times, fluxes, errs, mjd0, max_dt_wise,
                              snr_min=snr_min, band=b, snr_min_wise=snr_min_wise)
-        lam = lam_eff[b]
-        nu = (const.c.value / (lam * 1e-10)) # Hz
+        lam = LAM_EFF[b]
+        nu = (const.c.value / (lam * 1e-10))  # Hz
         if tsel:
             t, f, e = tsel
             sed["bands"].append(b)
@@ -419,109 +448,3 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
         raise ValueError("y_mode must be 'Fnu' or 'Flam'.")
 
     return x, y, ey, x_label, y_label
-
-# --------- plotter ----------
-def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="SED", 
-             secax=False, savepath=None):
-    """
-    y_mode='Fnu'  -> Fnu vs nu (mJy, Hz)
-    y_mode='Flam' -> Flam vs λ (cgs/Ang, Ang)
-    """
-
-    created_ax = False
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        created_ax = True
-
-    x, y, ey, x_label, y_label = _prepare_sed_xy(sed, y_mode=y_mode)
-    bands = np.array(sed["bands"])
-    is_ul = np.array(sed["is_ul"])
-    dt = np.array(sed["dt_labels"])
-
-    # detections per band
-    for b in np.unique(bands):
-        sel = (bands == b) & (~is_ul)
-        if np.any(sel):
-            ln = ax.errorbar(x[sel], y[sel], yerr=ey[sel],
-                             fmt=SED_MARKERS.get(b, "o"),
-                             color=SED_COLORS.get(b, "black"),
-                             mec=SED_COLORS.get(b, "black"),
-                             mfc=SED_COLORS.get(b, "black"),
-                             linestyle="none", label=b + f" ({dt[sel][0]})")
-
-    # upper limits
-    for b in np.unique(bands):
-        sel = (bands == b) & (is_ul)
-        if np.any(sel):
-            ln = ax.errorbar(x[sel], y[sel], yerr=None, uplims=True,
-                             fmt="v", markersize=7,
-                             color=SED_COLORS.get(b, "black"),
-                             mec=SED_COLORS.get(b, "black"),
-                             mfc=(0,0,0,0), linestyle="none", label=f"{b} upper limit")
-    if secax:  
-        # secondary axis      
-        if y_mode == "Fnu":
-            secax = ax.secondary_xaxis(
-                'top',
-                functions=(lambda nu: (const.c.value/nu)*1e6,        # ν [Hz] -> λ [µm]
-                        lambda lam_um: const.c.value/(lam_um*1e-6)) # λ [µm] -> ν [Hz]
-            )
-            secax.set_xlabel(r"$\lambda\ (\mu\mathrm{m})$")
-        elif y_mode == "Flam":
-            secax = ax.secondary_xaxis(
-                'top',
-                functions=(lambda lam_um: const.c.value/(lam_um*1e-6),  # λ [µm] -> ν [Hz]
-                        lambda nu: (const.c.value/nu)*1e6)           # ν [Hz] -> λ [µm]
-            )
-            secax.set_xlabel(r"$\nu\ (\mathrm{Hz})$")
-
-
-    if logx:
-        ax.set_xscale("log")
-    if logy:
-        ax.set_yscale("log")
-    
-    ax.set_xlabel(x_label, fontsize=12)
-    ax.set_ylabel(y_label, fontsize=12)
-    ax.set_title(f"{sed['oid']}: {title_prefix} near MJD {sed['mjd']:.2f}", fontsize=13)
-    ax.grid(True, alpha=0.4)
-
-    for line in ax.lines:
-        mfc = line.get_markerfacecolor()
-        mec = line.get_markeredgecolor()
-        if mfc is None or mfc == "none":
-            continue
-        if isinstance(mfc, (tuple, list)) and len(mfc) == 4:
-            r, g, b, _ = mfc
-        elif isinstance(mfc, str):
-            import matplotlib.colors as mcolors
-            r, g, b, _ = mcolors.to_rgba(mfc)
-        else:
-            continue
-        line.set_markerfacecolor((r, g, b, 0.3))   # semi-transparent fill
-        line.set_markeredgecolor((r, g, b, 1.0))   # solid outline
-        line.set_markeredgewidth(1.2)
-        line.set_markersize(7)
-
-    # legend: unique entries
-    handles, lbls = ax.get_legend_handles_labels()
-    seen, H, L = set(), [], []
-    for h, l in zip(handles, lbls):
-        if l not in seen:
-            H.append(h)
-            L.append(l)
-            seen.add(l)
-    if H:
-        ax.legend(H, L, fontsize=9)
-    
-    
-    plt.tight_layout()
-
-    if savepath:
-            plt.savefig(savepath, format="pdf", bbox_inches="tight")
-            print(f"Saved plot to {savepath}")
-    
-    if created_ax:
-        plt.show()
-
-    return ax
