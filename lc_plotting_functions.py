@@ -42,8 +42,8 @@ Irsa._session.auth = HTTPBasicAuth(username, password)
 meta = pd.read_csv("data/zenodo_metasample.csv")
 
 import dustmaps.config
-dustmaps.config.config['data_dir'] = '/Users/ana/Documents/LL_typeIIP/dustmaps_data'
-sfd = SFDQuery(map_dir='/Users/ana/Documents/LL_typeIIP/dustmaps_data/sfd')
+dustmaps.config.config['data_dir'] = 'dustmaps_data'
+sfd = SFDQuery(map_dir='dustmaps_data/sfd')
 
 ## Using a lot of Viraj's code from LSST CCA Summer School
 
@@ -482,7 +482,7 @@ def get_ztf_lc_data(oid, client, ra=None, dec=None,
         res_forced = get_ztf_forcedphot(forced_file)
         results['forced'] = res_forced
 
-    pkl_filename = f"/Users/ana/Documents/LL_typeIIP/data/ztf_resdicts/{oid}.pkl"
+    pkl_filename = f"data/ztf_resdicts/{oid}.pkl"
     with open(pkl_filename, "wb") as f:
         pickle.dump(results, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("Saved ztf_resdict for", oid, "to data/ztf_resdicts")

@@ -199,14 +199,14 @@ def main():
     # -----------------------------
 
     # Stellar temperature (K): cool photosphere range appropriate for your source
-    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000, 6250, 6500, 6750, 7000]
+    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000, 6250, 6500, 6750, 7000, 7250, 7500]
 
     # Inner dust temperature (K): warm silicate near sublimation
     tdust_values = [450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)
-    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 2.0, 3.0, 3.5, 4.0]
+    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 
     # Thickness (R_out / R_in)
     shell_thickness_values = [2.0]
@@ -256,7 +256,7 @@ def main():
     dusty_bin = (dusty_dir_abs / "dusty")
     if not dusty_bin.exists():
         raise FileNotFoundError(f"Missing DUSTY binary at {dusty_bin}. Build it or fix --dusty_file_dir.")
-    os.environ["PATH"] = f"{str(dusty_dir_abs)}:{os.environ.get('PATH','')}"
+    # os.environ["PATH"] = f"{str(dusty_dir_abs)}:{os.environ.get('PATH','')}"
 
     # -----------------------------
     # Check cache
