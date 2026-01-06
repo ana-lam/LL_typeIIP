@@ -1,0 +1,56 @@
+
+snr:
+  min: 3.0
+  min_wise: 2.0 # minimum SNR for WISE detection (more relaxed)
+
+
+wavelengths:
+  ZTF_g: 4770.0
+  ZTF_r: 6231.0
+  ZTF_i: 7625.0
+  W1: 34000.0
+  W2: 46000.0
+
+
+sed_plot:
+  colors:
+    ZTF_g: "green"
+    ZTF_r: "red"
+    ZTF_i: "orange"
+    W1: "navy"
+    W2: "dodgerblue"
+  
+  markers:
+    ZTF_g: "o"
+    ZTF_r: "X"
+    ZTF_i: "D"
+    W1: "s"
+    W2: "s"
+  
+  size: 20
+
+extinction:
+  r_v: 3.1 # Milky Way R_V (Cardelli 1989)
+  sf11_scale: 0.86 # Schlafly & Finkbeiner 2011 scaling
+  cardelli_coefficients: # Cardelli 1989 extinction law
+    ZTF_g: 1.157 # 3.172 / 2.742
+    ZTF_r: 0.828 # 2.271 / 2.742
+    ZTF_i: 0.613 # 1.682 / 2.742
+
+dustmaps:
+  data_dir: "data/dustmaps"  
+  sfd_dir: "data/dustmaps/sfd"
+
+paths:
+  data_dir: "data"
+  reference_dir: "data/reference"
+  forced_photometry_dir: "data/Das_forced_photometry"
+  alerce_dir: "data/ztf_alerce"
+  wise_dir: "data/snii_lcs_WISE"
+  dustmaps_dir: "data/dustmaps"
+  dusty_grid_dir: "dusty/dusty_runs"
+  
+  # specific files
+  params: "data/TableA_full_machine_readable_params.csv"
+  ztf_coords: "data/ZTF_coords.csv"
+  zenodo_meta: "data/zenodo_metasample.csv"
