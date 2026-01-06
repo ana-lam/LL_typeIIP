@@ -14,6 +14,8 @@ import subprocess
 import re
 import pandas as pd
 
+from ..config import config
+
 # pydusty imports
 from pydusty.dusty import DustyParameters, Dusty, Dusty_Alumina_SilDL
 from pydusty.parameters import Parameter
@@ -139,6 +141,10 @@ def run_single_model(job):
 
 def main():
     
+    # Use config from lltypeiip.config
+    default_dusty_file_dir = config.dusty.dusty_file_dir
+    default_workdir = config.dusty.workdir
+    
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--tau_wav_micron", type=float, default=0.55,
@@ -166,7 +172,7 @@ def main():
         help="Directory in which to run/store DUSTY outputs."
     )
     parser.add_argument(
-        "--dusty_file_dir", type=str, default="/Users/ana/Documents/dusty/releaseV2",
+        "--dusty_file_dir", type=str, default=default_dusty_file_dir,
         help="Directory with DUSTY code files."
     )
     parser.add_argument(
@@ -249,7 +255,16 @@ def main():
     # Paths (no chdir)
     # -----------------------------
 
-    workdir = (Path(args.workdir) / f'{dust_label}_fixed_thick_grid').resolve()
+    # Resolve workdir as absolute path
+    # If args.workdir is relative, make it relative to project root (parent of src/)
+    workdir_path = Path(args.workdir)
+    if not workdir_path.is_absolute():
+        # Find project root by going up from the script location
+        script_dir = Path(__file__).parent.resolve()  # lltypeiip/dusty/
+        project_root = script_dir.parent.parent.parent  # LL_typeIIP/
+        workdir_path = (project_root / args.workdir).resolve()
+    
+    workdir = (workdir_path / f'{dust_label}_fixed_thick_grid').resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
     dusty_dir_abs = Path(args.dusty_file_dir).resolve()
