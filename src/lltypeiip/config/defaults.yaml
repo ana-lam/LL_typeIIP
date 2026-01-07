@@ -48,6 +48,7 @@ dusty:
   dusty_file_dir: "/home/cal/analam/Documents/dusty/releaseV2"
   # Base directory for DUSTY model runs (within project)
   workdir: "dusty_runs"
+  workdir_mcmc_dir: "dusty_runs/mcmc_test_workdir"
 
 
 paths:
@@ -57,7 +58,8 @@ paths:
   alerce_dir: "data/ztf_alerce"
   wise_dir: "data/snii_lcs_WISE"
   dustmaps_dir: "data/dustmaps"
-  dusty_grid_dir: "dusty/dusty_runs"
+  dusty_grid_dir: "dusty_runs/silicate_tau_0.55um_fixed_thick_grid"
+  mcmc_results_dir: "mcmc_results"
   
   # specific files
   params: "data/TableA_full_machine_readable_params.csv"

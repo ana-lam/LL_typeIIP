@@ -284,6 +284,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         tau=tau_samples,
         a=a_samples,
         grid_best=best,
+        prior_config=prior_config,
         sampler=sampler
     )
 

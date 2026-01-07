@@ -18,7 +18,7 @@ class Config:
                 setattr(self, key, Config(value, resolve_paths=self._resolve_paths))
             else:
                 # Resolve relative paths in the 'paths' section
-                if self._resolve_paths and key.endswith('_dir') or key in ['params', 'ztf_coords', 'zenodo_meta']:
+                if self._resolve_paths and (key.endswith('_dir') or key in ['workdir', 'params', 'ztf_coords', 'zenodo_meta']):
                     if isinstance(value, str) and not Path(value).is_absolute():
                         value = str(PROJECT_ROOT / value)
                 setattr(self, key, value)
@@ -65,7 +65,7 @@ def load_config(config_path=None, resolve_paths=True):
             if section in config_dict:
                 section_dict = config_dict[section]
                 for key, value in section_dict.items():
-                    if key.endswith('_dir') and isinstance(value, str) and not Path(value).is_absolute():
+                    if (key.endswith('_dir') or key in ("workdir",)) and isinstance(value, str) and not Path(value).is_absolute():
                         section_dict[key] = str(PROJECT_ROOT / value)
     
     return Config(config_dict)
