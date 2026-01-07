@@ -177,7 +177,7 @@ def get_ztf_lc_data(oid, client, ra=None, dec=None,
             print(f"Warning: Forced photometry file not found: {forced_file}")
 
     # Save results
-    output_dir = Path(config.paths.data_dir) / "ztf_resdicts"
+    output_dir = Path(config.paths.data_dir) / "ztf_alerce"
     output_dir.mkdir(parents=True, exist_ok=True)
     pkl_filename = output_dir / f"{oid}.pkl"
     

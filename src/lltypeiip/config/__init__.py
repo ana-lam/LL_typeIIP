@@ -1,17 +1,26 @@
 import yaml
 from pathlib import Path
 
+# Project root directory (3 levels up from this file: src/lltypeiip/config/__init__.py)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
+
 
 class Config:
-    def __init__(self, config_dict):
+    def __init__(self, config_dict, resolve_paths=False):
         self._config = config_dict
+        self._resolve_paths = resolve_paths
         self._setup_attributes()
     
     def _setup_attributes(self):
         for key, value in self._config.items():
             if isinstance(value, dict):
-                setattr(self, key, Config(value))
+                # Pass resolve_paths flag to nested configs
+                setattr(self, key, Config(value, resolve_paths=self._resolve_paths))
             else:
+                # Resolve relative paths in the 'paths' section
+                if self._resolve_paths and key.endswith('_dir') or key in ['params', 'ztf_coords', 'zenodo_meta']:
+                    if isinstance(value, str) and not Path(value).is_absolute():
+                        value = str(PROJECT_ROOT / value)
                 setattr(self, key, value)
     
     def __getitem__(self, key):
@@ -27,18 +36,37 @@ class Config:
         return self._config.get(key, default)
 
 
-def load_config(config_path=None):
+def load_config(config_path=None, resolve_paths=True):
     """
     Load configuration from YAML file.
     
     config_path : Path, optional
         Path to configuration YAML file. If None, loads defaults.yaml from this directory.
+    resolve_paths : bool, optional
+        If True, resolve relative paths to absolute paths using PROJECT_ROOT. Default True.
     """
     if config_path is None:
         config_path = Path(__file__).parent / "defaults.yaml"
     
     with open(config_path, 'r') as f:
         config_dict = yaml.safe_load(f)
+    
+    # Handle path resolution specially for the 'paths' section
+    if resolve_paths and 'paths' in config_dict:
+        paths_dict = config_dict['paths']
+        for key, value in paths_dict.items():
+            if isinstance(value, str) and not Path(value).is_absolute():
+                paths_dict[key] = str(PROJECT_ROOT / value)
+        config_dict['paths'] = paths_dict
+    
+    # Handle other path-like entries (dustmaps, dusty)
+    if resolve_paths:
+        for section in ['dustmaps', 'dusty']:
+            if section in config_dict:
+                section_dict = config_dict[section]
+                for key, value in section_dict.items():
+                    if key.endswith('_dir') and isinstance(value, str) and not Path(value).is_absolute():
+                        section_dict[key] = str(PROJECT_ROOT / value)
     
     return Config(config_dict)
 
@@ -80,6 +108,7 @@ __all__ = [
     'load_config',
     'setup_dustmaps',
     'Config',
+    'PROJECT_ROOT',
     'SNR_MIN',
     'SNR_MIN_WISE',
     'LAM_EFF',

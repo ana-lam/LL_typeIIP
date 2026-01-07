@@ -11,7 +11,8 @@ from .scaling import compute_chi2
 def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=False,
                               y_padding_frac=0.5, logx=True, logy=True, secax=False,
                               savepath=None, mcmc_results=None, dusty_runner=None,
-                              mcmc_sample_mode="map"):
+                              mcmc_sample_mode="map", inset_lc=False, ztf_resdict=None,
+                              wise_resdict=None, inset_options=None):
     """
     Plot the best N models (after scaling) over the SED and optionally overlay
     best fit from MCMC results.
@@ -144,7 +145,16 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
                         lw=2, color="deeppink", linestyle='-', alpha=1,
                         label=label)
     # SED data
-    plot_sed(sed, ax=ax, y_mode=y_mode, logx=logx, logy=logy, secax=secax, savepath=None)
+    if inset_lc:
+        plot_sed(sed, ax=ax, y_mode=y_mode, logx=logx, logy=logy, secax=secax, legend_outside=False, savepath=None,
+                 inset_lc={
+                    "ztf_resdict": ztf_resdict,
+                    "wise_resdict": wise_resdict,
+                    "oid": sed['oid'],
+                },
+                inset_options=inset_options)
+    else:
+        plot_sed(sed, ax=ax, y_mode=y_mode, logx=logx, logy=logy, secax=secax, legend_outside=False, savepath=None)
 
     if keep_sed_limits:
         ymin, ymax = np.nanmin(y_sed), np.nanmax(y_sed)

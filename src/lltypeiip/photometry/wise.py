@@ -2,6 +2,7 @@ import numpy as np
 import glob
 import json
 from pathlib import Path
+from ..config import config
 
 def subtract_wise_parity_baseline(wise_resdict, clip_negatives=False, dt=200, 
                                   rescale_uncertainties=True, NEOWISE_t0=56650.0,
@@ -187,7 +188,7 @@ def subtract_wise_parity_baseline(wise_resdict, clip_negatives=False, dt=200,
 def get_wise_lc_data(oid):
 
     try:
-        filename = glob.glob(f"data/ztf_snii_lcs_WISE/lightcurve_{oid}_*.json")[0]
+        filename = glob.glob(f"{config.paths.wise_dir}/lightcurve_{oid}_*.json")[0]
     except IndexError:
         print(f"No WISE light curve file found for {oid}")
         return {}

@@ -1,22 +1,32 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.constants as const
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from ..config import SED_COLORS, SED_MARKERS
+from ..photometry.plotting import plot_combined_lc
 from .build import _prepare_sed_xy
 
 
-# --------- plotter ----------
-def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="SED", 
-             secax=False, savepath=None):
+def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
+    title_prefix="SED", secax=False, savepath=None, legend_outside=True,
+    inset_lc=None, inset_options=None):
     """
     y_mode='Fnu'  -> Fnu vs nu (mJy, Hz)
     y_mode='Flam' -> Flam vs λ (cgs/Ang, Ang)
+
+    inset_lc : dict, optional
+        Provide light-curve data to embed as an inset. Expected keys:
+        {"ztf_resdict": ..., "wise_resdict": ..., "oid": ...}.
+        When given, an inset uses plot_combined_lc(mode="overlay") and
+        draws a red vertical line at sed["mjd"].
+    inset_options : dict, optional
+        Extra options forwarded to plot_combined_lc (e.g., logy, scale_wise).
     """
 
     created_ax = False
     if ax is None:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
+        fig, ax = plt.subplots(figsize=(8, 5))
         created_ax = True
 
     x, y, ey, x_label, y_label = _prepare_sed_xy(sed, y_mode=y_mode)
@@ -69,7 +79,7 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="
     
     ax.set_xlabel(x_label, fontsize=12)
     ax.set_ylabel(y_label, fontsize=12)
-    ax.set_title(f"{sed['oid']}: {title_prefix} near MJD {sed['mjd']:.2f}", fontsize=13)
+    ax.set_title(f"{sed['oid']}: {title_prefix} at MJD {sed['mjd']:.2f}", fontsize=13)
     ax.grid(True, alpha=0.4)
 
     for line in ax.lines:
@@ -98,9 +108,48 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False, title_prefix="
             L.append(l)
             seen.add(l)
     if H:
-        ax.legend(H, L, fontsize=9)
-    
-    
+        if legend_outside:
+                ax.legend(
+                    H,
+                    L,
+                    fontsize=9,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.2),
+                    borderaxespad=0.0,
+                    ncol=4,
+                )
+        else:
+            ax.legend(H, L, fontsize=9)
+
+    # optional inset LC
+    if inset_lc is not None and isinstance(inset_lc, dict):
+        ztf_resdict = inset_lc.get("ztf_resdict")
+        wise_resdict = inset_lc.get("wise_resdict", {})
+        if ztf_resdict is not None:
+            inset_kwargs = {
+                "ztf_flux": True,
+                "mode": "overlay",
+                "scale_wise": True,
+                "baseline_ref": "wise_parity",
+                "ref_band": "r",
+                "logy": True,
+                "labels": False
+            }
+            if inset_options:
+                inset_kwargs.update(inset_options)
+                print(inset_kwargs)
+
+            ax_inset = inset_axes(ax, width="30%", height="30%", loc="upper right", borderpad=1.1)
+            plot_combined_lc(
+                ztf_resdict,
+                wise_resdict,
+                oid=inset_lc.get("oid", sed.get("oid", "source")),
+                ax=ax_inset,
+                **inset_kwargs,
+            )
+            ax_inset.axvline(sed["mjd"], color="red", lw=2.5, alpha=0.9)
+            ax_inset.grid(True, alpha=0.3)
+
     plt.tight_layout()
 
     if savepath:

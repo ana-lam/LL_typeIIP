@@ -698,10 +698,12 @@ def plot_wise_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=Tru
 ######## ---------- COMBINED PLOTTING FUNCTIONS --------------- ###########
 ###########################################################################
 
-def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source", 
-                     xlim=(None, None), ztf_flux=False, mode="stacked",
-                     scale_wise=True, baseline_ref="ztf", baseline_dt=100,
-                     ref_band="r", logy=False, savepath=None):   
+def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
+            xlim=(None, None), ztf_flux=False, mode="stacked", scale_wise=True,
+            baseline_ref="ztf", baseline_dt=100, ref_band="r", logy=False,
+            savepath=None, ax=None, labels=True, mark_tail_start=False,
+            mark_plateau_end=False
+        ):   
     """
     Plot ZTF + WISE light curves.
     
@@ -761,7 +763,7 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         # Top panel: ZTF LC
         # -----------------
         if ztf_flux:
-            print("Converting ZTF mag to mJy...")
+            # print("Converting ZTF mag to mJy...")
             ztf_resdict = convert_ZTF_mag_mJy(ztf_resdict, forced=True)
 
             # clip fluxes for log scale
@@ -839,6 +841,75 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         ax2.legend()
         fig.subplots_adjust(hspace=0.0)
         fig.suptitle(f"ZTF + WISE Light Curve: {oid}", fontsize=16, y=0.93)
+
+        if mark_tail_start:
+            params_path = Path(config.paths.params)
+            params = pd.read_csv(params_path)
+            m = params[['name', 'plateauend', 'tailstart']].dropna()
+            m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
+            if oid in m_dict:
+                tail_start = m_dict[oid]
+                ax1.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+                ax1.text(
+                    tail_start-2,          # x position (data coords)
+                    0.95,                 # y as a fraction of the axes height
+                    "Tail Start",        # text
+                    rotation=90,          # vertical text
+                    va="top",             # align text relative to its position
+                    ha="center",
+                    fontsize=9,
+                    color="black",
+                    transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
+                    clip_on=False,
+                )
+                ax2.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+                ax2.text(
+                    tail_start-2,          # x position (data coords)
+                    0.95,                 # y as a fraction of the axes height
+                    "Tail Start",        # text
+                    rotation=90,          # vertical text
+                    va="top",             # align text relative to its position
+                    ha="center",
+                    fontsize=9,
+                    color="black",
+                    transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
+                    clip_on=False,
+                )
+        
+        if mark_plateau_end:
+            params_path = Path(config.paths.params)
+            params = pd.read_csv(params_path)
+            m = params[['name', 'plateauend', 'tailstart']].dropna()
+            m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
+            if oid in m_dict:
+                plateau_end = m_dict[oid]
+                ax1.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                ax2.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                ax1.text(
+                    plateau_end-2,          # x position (data coords)
+                    0.05,                 # y as a fraction of the axes height
+                    f"Plateau End ({plateau_end:.1f})",        # text
+                    rotation=90,          # vertical text
+                    va="bottom",             # align text relative to its position
+                    ha="center",
+                    fontsize=9,
+                    color="black",
+                    transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
+                    clip_on=False,
+                )
+                ax2.text(
+                    plateau_end-2,          # x position (data coords)
+                    0.05,                 # y as a fraction of the axes height
+                    f"Plateau End ({plateau_end:.1f})",        # text
+                    rotation=90,          # vertical text
+                    va="bottom",             # align text relative to its position
+                    ha="center",
+                    fontsize=9,
+                    color="black",
+                    transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
+                    clip_on=False,
+                )
+
         if savepath:
             plt.savefig(savepath, format="pdf", bbox_inches="tight")
             print(f"Saved plot to {savepath}")
@@ -849,11 +920,16 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         # ---------------------------
         # Single-panel figure
         # ---------------------------
-        fig, ax = plt.subplots(figsize=(10,6))
+        created_ax = False
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10,6))
+            created_ax = True
+        else:
+            fig = ax.figure
 
         # --- ZTF LC ---
         if ztf_flux:
-            print("Converting ZTF mag to mJy...")
+            # print("Converting ZTF mag to mJy...")
             ztf_resdict = convert_ZTF_mag_mJy(ztf_resdict, forced=True)
 
             if logy:
@@ -909,18 +985,23 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             line.set_markeredgewidth(1.2)
             line.set_markersize(7)
 
-        ax.set_title(f"ZTF + WISE Light Curve: {oid}", fontsize=16)
-        ax.set_xlabel("MJD", fontsize=14)
-        ax.set_ylabel("Flux (mJy)", fontsize=14)
+        if labels:
+            ax.set_title(f"ZTF + WISE Light Curve: {oid}", fontsize=16)
+            ax.set_xlabel("MJD", fontsize=14)
+            ax.set_ylabel("Flux (mJy)", fontsize=14)
         
-        handles, labels = ax.get_legend_handles_labels()
-        # keep only ZTF detections and WISE bands
-        keep = ["ZTF_g", "ZTF_r", "ZTF_i", "W1", "W2"]
-        filtered = [(h, l) for h, l in zip(handles, labels) if l in keep]
+            handles, labels = ax.get_legend_handles_labels()
+            # keep only ZTF detections and WISE bands
+            keep = ["ZTF_g", "ZTF_r", "ZTF_i", "W1", "W2"]
+            filtered = [(h, l) for h, l in zip(handles, labels) if l in keep]
 
-        if filtered:
-            handles, labels = zip(*filtered)
-            ax.legend(handles, labels, loc="upper left", bbox_to_anchor=(1.02, 1))
+            if filtered:
+                handles, labels = zip(*filtered)
+                ax.legend(handles, labels, loc="upper right")
+        if not labels:
+            ax.tick_params(labelbottom=True, labelleft=False)
+            ax.set_xlabel("MJD", fontsize=10)
+
 
         ax.grid(True, alpha=0.4)
 
@@ -928,11 +1009,58 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             ax.set_yscale("log")
             ax.set_ylim(0, max(ax.get_ylim()))
 
+        if mark_tail_start:
+            params_path = Path(config.paths.params)
+            params = pd.read_csv(params_path)
+            m = params[['name', 'plateauend', 'tailstart']].dropna()
+            m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
+            if labels:
+                if oid in m_dict:
+                    tail_start = m_dict[oid]
+                    ax.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+                    ax.text(
+                        tail_start-2,          # x position (data coords)
+                        0.05,                 # y as a fraction of the axes height
+                        f"Tail Start ({tail_start:.1f})",        # text
+                        rotation=90,          # vertical text
+                        va="bottom",             # align text relative to its position
+                        ha="center",
+                        fontsize=9,
+                        color="black",
+                        transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
+                        clip_on=False,
+                    )
+        
+        if mark_plateau_end:
+            params_path = Path(config.paths.params)
+            params = pd.read_csv(params_path)
+            m = params[['name', 'plateauend', 'tailstart']].dropna()
+            m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
+            if oid in m_dict:
+                plateau_end = m_dict[oid]
+                ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                if labels:
+                    ax.text(
+                        plateau_end-2,          # x position (data coords)
+                        0.05,                 # y as a fraction of the axes height
+                        f"Plateau End ({plateau_end:.1f})",        # text
+                        rotation=90,          # vertical text
+                        va="bottom",             # align text relative to its position
+                        ha="center",
+                        fontsize=9,
+                        color="black",
+                        transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
+                        clip_on=False,
+                    )
+
         if savepath:
-            plt.savefig(savepath, format="pdf", bbox_inches="tight")
+            fig.savefig(savepath, format="pdf", bbox_inches="tight")
             print(f"Saved plot to {savepath}")
-        else:
+        elif created_ax:
             plt.show()
+
+        return ax
 
     else:
         raise ValueError("Invalid mode. Choose 'stacked' or 'overlay'.")
