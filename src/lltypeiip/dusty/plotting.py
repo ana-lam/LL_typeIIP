@@ -56,7 +56,7 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
         label = (
                     r"Grid: "
                     rf"$T*: {m.Tstar}\,\mathrm{{K}},\ "
-                    rf"T_\mathrm{{dust}}: {m.Tdust}\,\mathrm{{K}},\ "
+                    rf"T_\mathrm{{d}}: {m.Tdust}\,\mathrm{{K}},\ "
                     rf"\tau: {m.tau},$"
                     "\n"
                     rf"$a: {a0:.1f}\times10^{{{exp}}} \ $ "
@@ -133,7 +133,7 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
                 label = (
                     r"MCMC: "
                     rf"$T*: {T_med:.0f}_{{-{T_m_err:.0f}}}^{{+{T_p_err:.0f}}}\,\mathrm{{K}},\ "
-                    rf"T_\mathrm{{dust}}: {Td_med:.0f}_{{-{Td_m_err:.0f}}}^{{+{Td_p_err:.0f}}}\,\mathrm{{K}},\ "
+                    rf"T_\mathrm{{d}}: {Td_med:.0f}_{{-{Td_m_err:.0f}}}^{{+{Td_p_err:.0f}}}\,\mathrm{{K}},\ "
                     rf"\tau: {tau_med:.2f}_{{-{tau_m_err:.2f}}}^{{+{tau_p_err:.2f}}},$"
                     "\n"
                     rf"$a = {a0:.1f}_{{-{a0_m:.1f}}}^{{+{a0_p:.1f}}}\times10^{{{exp}}} \ $"
