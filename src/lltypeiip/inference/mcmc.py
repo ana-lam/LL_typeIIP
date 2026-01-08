@@ -268,6 +268,17 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     samples = sampler.get_chain(discard=burn_in, flat=True)
     log_prob_samples = sampler.get_log_prob(discard=burn_in, flat=True)
 
+    # for diagnostics
+    chain_full = sampler.get_chain() 
+    logp_full  = sampler.get_log_prob() 
+    af = sampler.acceptance_fraction
+
+    try:
+        tau_int = sampler.get_autocorr_time(tol=0)
+    except Exception:
+        tau_int = None
+
+
     # transform back to (tstar, tdust, tau)
     tstar_samples = samples[:, 0]
     tdust_samples = samples[:, 1]
@@ -285,7 +296,11 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         a=a_samples,
         grid_best=best,
         prior_config=prior_config,
-        sampler=sampler
+        sampler=sampler,
+        chain=chain_full,
+        log_prob_chain=logp_full,
+        acceptance_fraction=af,
+        autocorr_time=tau_int
     )
 
     return results

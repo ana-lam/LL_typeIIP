@@ -9,10 +9,14 @@ def MNi_from_tail(Lbol, t_days):
     could add something for not full trapping
     """
 
-    tau_Co = 111.3  # cobalt decay time in days
+    tau_Co = 111.3  # cobalt decay time in days, 56Co->56Fe
+    tau_Ni = 8.8 # nickel decay time in days, 56Ni->56Co
 
-    L0= 1.45e43 # erg/s per Msun of Ni-56
+    a_Co= 1.45e43 # erg/s per Msun of 56Co
+    a_Ni = 6.45e43  # erg/s per Msun of 56Ni
 
-    MNi = (Lbol / L0)*np.exp(t_days / tau_Co)
+    Q = (a_Ni * np.exp(-t_days / tau_Ni)) + (a_Co * np.exp(-t_days / tau_Co))
+
+    MNi = Lbol / Q # in Msun
 
     return MNi
