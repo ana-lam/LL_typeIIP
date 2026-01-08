@@ -193,7 +193,7 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
     plt.tight_layout()
 
     if savepath:
-        plt.savefig(savepath, format="pdf", bbox_inches="tight")
+        plt.savefig(savepath, bbox_inches="tight")
         print(f"Saved plot to {savepath}")
     else:
         plt.show()

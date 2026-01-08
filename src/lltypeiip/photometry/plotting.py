@@ -1002,6 +1002,16 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             ax.tick_params(labelbottom=True, labelleft=False)
             ax.set_xlabel("MJD", fontsize=10)
 
+            # change marker size for inset
+            for col in ax.collections:
+                if isinstance(col, mcoll.PathCollection):
+                    col.set_sizes([7])  
+
+            # ---- resize errorbar markers ----
+            for line in ax.lines:
+                if line.get_marker() not in (None, "", "None"):
+                    line.set_markersize(2) 
+
 
         ax.grid(True, alpha=0.4)
 
@@ -1014,10 +1024,13 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             params = pd.read_csv(params_path)
             m = params[['name', 'plateauend', 'tailstart']].dropna()
             m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
-            if labels:
-                if oid in m_dict:
-                    tail_start = m_dict[oid]
+            if oid in m_dict:
+                tail_start = m_dict[oid]
+                if not labels:
+                    ax.axvline(tail_start, color='black', linestyle='--', alpha=0.7, linewidth=1.3)
+                else:
                     ax.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+                if labels:
                     ax.text(
                         tail_start-2,          # x position (data coords)
                         0.05,                 # y as a fraction of the axes height
@@ -1038,8 +1051,10 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
             if oid in m_dict:
                 plateau_end = m_dict[oid]
-                ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
-                ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                if not labels:
+                    ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7, linewidth=1.3)
+                else:
+                    ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
                 if labels:
                     ax.text(
                         plateau_end-2,          # x position (data coords)

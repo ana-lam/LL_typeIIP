@@ -133,7 +133,9 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
                 "baseline_ref": "wise_parity",
                 "ref_band": "r",
                 "logy": True,
-                "labels": False
+                "labels": False,
+                "mark_plateau_end": True,
+                "mark_tail_start": True,
             }
             if inset_options:
                 inset_kwargs.update(inset_options)
@@ -147,13 +149,13 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
                 ax=ax_inset,
                 **inset_kwargs,
             )
-            ax_inset.axvline(sed["mjd"], color="red", lw=2.5, alpha=0.9)
+            ax_inset.axvline(sed["mjd"], color="red", lw=1.75, alpha=0.75)
             ax_inset.grid(True, alpha=0.3)
 
     plt.tight_layout()
 
     if savepath:
-            plt.savefig(savepath, format="pdf", bbox_inches="tight")
+            plt.savefig(savepath, bbox_inches="tight")
             print(f"Saved plot to {savepath}")
     
     if created_ax:
