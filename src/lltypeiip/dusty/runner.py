@@ -191,15 +191,15 @@ class DustyRunner:
         prev_cwd = os.getcwd()
         try:
             dusty_params = self._build_parameters(*ckey)
-
-            runner = Dusty(
-                parameters=dusty_params,
-                dusty_working_directory=str(run_dir),
-                dusty_file_directory=self.dusty_file_dir,
-            )
-
-            os.chdir(str(run_dir))
             with silence_fds():
+                runner = Dusty(
+                    parameters=dusty_params,
+                    dusty_working_directory=str(run_dir),
+                    dusty_file_directory=self.dusty_file_dir,
+                )
+
+                os.chdir(str(run_dir))
+                
                 runner.generate_input()
                 runner.run()
                 lam, flx, npt, r1, ierror = runner.get_results()
