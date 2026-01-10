@@ -34,6 +34,7 @@ def parse_args():
     p.add_argument("--nsteps", type=int, default=4000)
     p.add_argument("--burnin", type=int, default=1000)
     p.add_argument("--ncores", type=int, default=4)
+    p.add_argument("--progress-every", type=int, default=100)
 
     # mixture
     p.add_argument("--mix-weight", type=float, default=0.3,
@@ -137,6 +138,7 @@ def main():
             n_cores=args.ncores,
             mp_prefer=args.mp,
             random_seed=args.seed,
+            progress_every=args.progress_every,
             **mode_kwargs[mode],
         )
 

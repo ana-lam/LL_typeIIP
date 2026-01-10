@@ -18,12 +18,13 @@ echo
 parallel -j "$NJOBS" --bar \
   "echo '>>> Starting {} at \$(date)' && \
    python -m lltypeiip.inference.run_sed_mcmc {} \
-     --mode data \
-     --nsteps 1500 \
-     --burnin 300 \
+     --sweep \
+     --nsteps 6000 \
+     --burnin 1000 \
      --nwalkers 32 \
      --ncores $NCORES \
      --mp fork \
+     --progress-every 100 \
      > ${LOGDIR}/{}.log 2>&1 && \
    echo '<<< Finished {} at \$(date)'" \
   :::: "$OIDS_FILE"

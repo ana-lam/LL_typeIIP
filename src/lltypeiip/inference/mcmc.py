@@ -184,7 +184,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      random_seed=42, posterior_mode="data", mix_weight=0.3,
                      tstar_sigma_frac=0.3, tdust_sigma_frac=0.5, 
                      log10_tau_sigma=0.5, log10_a_sigma=1.0,
-                     init_mode="hybrid", init_scales=None):
+                     init_mode="hybrid", init_scales=None, progress_every=None):
     """
     Run emcee for a given SED using DUSTY models.
 
@@ -254,8 +254,15 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             args=(sed, dusty_runner, prior_config, y_mode, use_weights),
             pool=pool
         )
-        print(f"Running MCMC: nwalkers={nwalkers}, nsteps={nsteps}...")
-        sampler.run_mcmc(p0, nsteps, progress=True)
+        print(f"Running MCMC: nwalkers={nwalkers}, nsteps={nsteps}...", flush=True)
+
+        if progress_every is not None:
+            state = p0
+            for i, state in enumerate(sampler.sample(state, iterations=nsteps), start=1):
+                if (i == 1) or (i % progress_every == 0) or (i == nsteps):
+                    print(f"[emcee] step {i}/{nsteps}", flush=True)
+        else:
+            sampler.run_mcmc(p0, nsteps, progress=True)
 
     # sampler = emcee.EnsembleSampler(nwalkers,
     #                                 ndim,
