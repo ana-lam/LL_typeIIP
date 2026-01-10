@@ -8,6 +8,8 @@ import numpy as np
 from pydusty.dusty import Dusty, DustyParameters
 from pydusty.parameters import Parameter
 from astropy.io import ascii
+import tempfile
+from collections import OrderedDict
 
 from ..config import config
 
@@ -40,7 +42,8 @@ class DustyRunner:
     def __init__(self, base_workdir=config.dusty.workdir, dusty_file_dir=config.dusty.dusty_file_dir,
                  dust_type="silicate", shell_thickness=2.0,
                  tstarmin=2000., tstarmax=12000., custom_grain_distribution=False,
-                 tau_wavelength_microns=0.55, blackbody=True, logger=None, quiet=True):
+                 tau_wavelength_microns=0.55, blackbody=True, logger=None, quiet=True,
+                 cache_max=5000, cache_dir=None, cache_ndigits=4, use_tmp=True):
         
         self.base_workdir = Path(base_workdir).resolve()
         self.base_workdir.mkdir(parents=True, exist_ok=True)
@@ -58,22 +61,50 @@ class DustyRunner:
         self.tau_wavelength_microns_val = float(tau_wavelength_microns)
         self.blackbody_val = bool(blackbody)
 
-        self._cache = {}   # (tstar, tdust, tau, shell_thickness) -> (lam_um, lamFlam, r1)
+        self._cache = OrderedDict() # (tstar, tdust, tau, shell_thickness) -> (lam_um, lamFlam, r1)
+        self.cache_max = int(cache_max)
+        self.cache_dir = Path(cache_dir).resolve() if cache_dir else None
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        self.cache_ndigits = int(cache_ndigits)
+        self.use_tmp = bool(use_tmp)
+
+
         self.logger = logger
         self.quiet = quiet
 
-    @staticmethod
-    def _make_leaf(tstar, tdust, tau, shell_thickness, ndigits=6):
-        """Canonical naming + canonical float key."""
-        tstar_i = int(round(float(tstar)))
-        tdust_i = int(round(float(tdust)))
-        tau_f = round(float(tau), ndigits)
-        thick_f = round(float(shell_thickness), ndigits)
+    def _canonical_key(self, tstar, tdust, tau, shell_thickness):
+            """Quantize parameters so cache hits happen."""
+            tstar_i = int(round(float(tstar)))
+            tdust_i = int(round(float(tdust)))
+            tau_f = round(float(tau), self.cache_ndigits)
+            thick_f = round(float(shell_thickness), self.cache_ndigits)
+            return (tstar_i, tdust_i, tau_f, thick_f)
 
-        leaf = (f"Tstar_{tstar_i}_Tdust_{tdust_i}_"
-                f"tau_{tau_f:.{ndigits}g}_thick_{thick_f:.{ndigits}g}").replace('.', '_')
-        
+    @staticmethod
+    def _leaf_from_ckey(ckey):
+        tstar_i, tdust_i, tau_f, thick_f = ckey
+        leaf = f"Tstar_{tstar_i}_Tdust_{tdust_i}_tau_{tau_f}_thick_{thick_f}".replace(".", "_")
         return leaf
+    
+    def _cache_get(self, ckey):
+        if ckey in self._cache:
+            self._cache.move_to_end(ckey)
+            return self._cache[ckey]
+        return None
+
+    def _cache_set(self, ckey, value):
+        self._cache[ckey] = value
+        self._cache.move_to_end(ckey)
+        if len(self._cache) > self.cache_max:
+            self._cache.popitem(last=False)
+
+    def _disk_cache_path(self, ckey):
+        if self.cache_dir is None:
+            return None
+        leaf = self._leaf_from_ckey(ckey)
+        return self.cache_dir / f"{leaf}.npz"
     
     def _build_parameters(self, tstar, tdust, tau, shell_thickness):
         
@@ -120,87 +151,91 @@ class DustyRunner:
         if shell_thickness is None:
             shell_thickness = self.shell_thickness_fixed
 
-        key = (float(tstar), float(tdust), float(tau), float(shell_thickness))
+        ckey = self._canonical_key(tstar, tdust, tau, shell_thickness)
 
-        if key in self._cache:
-            return self._cache[key]
-        
-        leaf = self._make_leaf(*key)
-        run_dir = (self.base_workdir / leaf).resolve()
-        run_dir.mkdir(parents=True, exist_ok=True)
+        # check in-memory cache
+        hit = self._cache_get(ckey)
+        if hit is not None:
+            return hit
 
-        sed_path = run_dir / "sed.dat"
-
-        # do not run if already exists
-        if sed_path.exists():
-            table = ascii.read(sed_path, names=["lam", "flux"], comment="#", fast_reader=False)
-            lam_um = np.array(table["lam"], float)
-            lamFlam = np.array(table["flux"], float)
-
+        # check disk cache
+        dpath = self._disk_cache_path(ckey)
+        if dpath is not None and dpath.exists():
             try:
-                with sed_path.open() as f:
-                    first = f.readline().strip()
-                # "# r1value"
-                if first.startswith("#"):
-                    r1 = float(first[1:].strip())
-                else:
-                    r1 = np.nan
+                z = np.load(dpath, allow_pickle=False)
+                lam_um = z["lam_um"]
+                lamFlam = z["lamFlam"]
+                r1 = float(z["r1"])
+                out = (lam_um, lamFlam, r1)
+                self._cache_set(ckey, out)
+                return out
             except Exception:
-                r1 = np.nan
-
-            self._cache[key] = (lam_um, lamFlam, r1)
-            return lam_um, lamFlam, r1
+                # corrupted cache file -> remove
+                try:
+                    dpath.unlink()
+                except Exception:
+                    pass
         
-        # run DUSTY
-        # Silence all OS-level stdout/stderr from DUSTY & friends
-        with silence_fds():
-            dusty_params = self._build_parameters(*key)
+        pid_root = self.base_workdir / f"pid{os.getpid()}"
+        pid_root.mkdir(parents=True, exist_ok=True)
+
+        if self.use_tmp:
+            tmp_cm = tempfile.TemporaryDirectory(dir=str(pid_root), prefix="dusty_")
+            run_dir = Path(tmp_cm.name)
+        else:
+            # fallback: one dir per canonical model (still bounded if cache hits)
+            run_dir = pid_root / self._leaf_from_ckey(ckey)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            tmp_cm = None
+
+        prev_cwd = os.getcwd()
+        try:
+            dusty_params = self._build_parameters(*ckey)
+
             runner = Dusty(
                 parameters=dusty_params,
                 dusty_working_directory=str(run_dir),
                 dusty_file_directory=self.dusty_file_dir,
             )
 
-        # ensure DUSTY binary is present & executable
-        dst = run_dir / "dusty"
-        if not dst.exists():
-            shutil.copy2(self.dusty_bin, dst)
-            dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        
-        if not os.access(dst, os.X_OK):
-            raise PermissionError(f"DUSTY binary at {dst} is not executable.")
-        
-        # run DUSTY
-        prev_cwd = os.getcwd()
-        try:
             os.chdir(str(run_dir))
-            # os.environ["PATH"] = f"{str(run_dir)}:{str(Path(self.dusty_file_dir).resolve())}:{os.environ.get('PATH','')}"
-
-            runner.generate_input()
-            runner.run()
-            lam, flx, npt, r1, ierror = runner.get_results()
+            with silence_fds():
+                runner.generate_input()
+                runner.run()
+                lam, flx, npt, r1, ierror = runner.get_results()
 
         except Exception as e:
-            os.chdir(prev_cwd)
             if self.logger:
                 self.logger.error(f"Error running DUSTY in {run_dir}: {e}")
-            self._cache[key] = (None, None, None)
-            return None, None, None
-        
-        os.chdir(prev_cwd)
+            out = (None, None, None)
+            self._cache_set(ckey, out)
+            return out
+
+        finally:
+            os.chdir(prev_cwd)
+            if tmp_cm is not None:
+                tmp_cm.cleanup()
 
         if ierror != 0:
             if self.logger:
-                self.logger.warning(f"DUSTY returned ierror={ierror} for {key}")
-            self._cache[key] = (None, None, None)
-            return None, None, None
+                self.logger.warning(f"DUSTY ierror={ierror} for {ckey}")
+            out = (None, None, None)
+            self._cache_set(ckey, out)
+            return out
 
-        if ierror == 0:
-            with sed_path.open("w") as f:
-                f.write(f"# {r1}\n")
-                f.write("lam, flux\n")
-                for ind in range(len(lam)):
-                    f.write(f"{lam[ind]}, {flx[ind]}\n")
-        self._cache[key] = (lam, flx, r1)
+        lam_um = np.asarray(lam, float)
+        lamFlam = np.asarray(flx, float)
+        r1 = float(r1)
+
+        out = (lam_um, lamFlam, r1)
+
+        # save disk cache (optional)
+        if dpath is not None:
+            try:
+                np.savez_compressed(dpath, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+            except Exception:
+                pass
+
+        self._cache_set(ckey, out)
         
-        return lam, flx, r1
+        return out

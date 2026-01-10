@@ -45,6 +45,16 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--mp", choices=["spawn", "fork"], default="spawn")
 
+    # cache
+    p.add_argument("--cache-dir", type=str, default="",
+               help="On-disk cache for DUSTY results (npz). Default: <workdir>/dusty_npz_cache")
+    p.add_argument("--cache-ndigits", type=int, default=4,
+                help="Rounding digits used for tau/thickness cache keys.")
+    p.add_argument("--cache-max", type=int, default=5000,
+                help="Max number of models kept in memory cache per process.")
+    p.add_argument("--no-tmp", action="store_true", help="Disable temp dirs for DUSTY runs")
+
+
     return p.parse_args()
 
 def main():
@@ -139,6 +149,10 @@ def main():
             mp_prefer=args.mp,
             random_seed=args.seed,
             progress_every=args.progress_every,
+            cache_dir=args.cache_dir,
+            cache_ndigits=args.cache_ndigits,
+            cache_max=args.cache_max,
+            use_tmp=not args.no_tmp,
             **mode_kwargs[mode],
         )
 

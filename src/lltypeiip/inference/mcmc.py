@@ -4,6 +4,7 @@ from multiprocessing import get_context
 import emcee
 import numpy as np
 from astropy import constants as const
+from pathlib import Path
 
 from ..dusty import DustyRunner, compute_chi2
 from ..sed.build import _prepare_sed_xy
@@ -184,7 +185,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      random_seed=42, posterior_mode="data", mix_weight=0.3,
                      tstar_sigma_frac=0.3, tdust_sigma_frac=0.5, 
                      log10_tau_sigma=0.5, log10_a_sigma=1.0,
-                     init_mode="hybrid", init_scales=None, progress_every=None):
+                     init_mode="hybrid", init_scales=None, progress_every=None,
+                     cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True):
     """
     Run emcee for a given SED using DUSTY models.
 
@@ -195,10 +197,17 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
       - "mixture": soft hint from grid + broad exploration
     """
 
+    if cache_dir is None:
+        cache_dir = str(Path(workdir) / "dusty_npz_cache")
+
     dusty_runner = DustyRunner(base_workdir=workdir,
                                dusty_file_dir=dusty_file_dir,
                                dust_type=dust_type,
-                               shell_thickness=shell_thickness)
+                               shell_thickness=shell_thickness,
+                               cache_dir=cache_dir,
+                               cache_ndigits=cache_ndigits,
+                               cache_max=cache_max,
+                               use_tmp=use_tmp)
     
     # best-fit from grid
     best_row = grid_df.iloc[0]
