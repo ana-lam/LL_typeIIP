@@ -88,13 +88,23 @@ def main():
     seds = build_multi_epoch_seds_from_tail(
         ztf_resdict,
         wise_resdict,
-        require_wise_detection=True
+        min_detected_bands=4,
+        require_wise_detection=True,
+        max_dt_ztf=5.0,
+        max_dt_wise=5.0
     )
 
     if len(seds) == 0:
         raise RuntimeError("No valid SEDs constructed (WISE detection required).")
 
-    sed = seds[0]
+    if len(seds) > 0:
+        print(f"  Found {len(seds)} SED tail epochs with WISE detections for {oid}:")
+        print("\n".join(
+            [f"  MJD {sed['mjd']:.2f}, bands: {list(sed['bands'])}" for sed in seds]
+        ))
+        best = max(seds, key=lambda sed: (len(sed["bands"]), sed["mjd"]))
+        sed = best
+    
     print(f"Using SED epoch at MJD ~ {np.nanmean(sed['mjd']):.1f}")
 
     # grid fitting
@@ -137,6 +147,7 @@ def main():
 
     for mode in modes:
         print(f"\n=== Running mode: {mode} ===", flush=True)
+        run_tag = f"{oid}_{mode}_seed{args.seed}"
         results = run_mcmc_for_sed(
             sed=sed,
             grid_df=df,
@@ -153,6 +164,7 @@ def main():
             cache_ndigits=args.cache_ndigits,
             cache_max=args.cache_max,
             use_tmp=not args.no_tmp,
+            run_tag=run_tag,
             **mode_kwargs[mode],
         )
 

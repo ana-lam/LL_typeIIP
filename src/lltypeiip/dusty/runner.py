@@ -10,6 +10,7 @@ from pydusty.parameters import Parameter
 from astropy.io import ascii
 import tempfile
 from collections import OrderedDict
+import uuid
 
 from ..config import config
 
@@ -43,7 +44,7 @@ class DustyRunner:
                  dust_type="silicate", shell_thickness=2.0,
                  tstarmin=2000., tstarmax=12000., custom_grain_distribution=False,
                  tau_wavelength_microns=0.55, blackbody=True, logger=None, quiet=True,
-                 cache_max=5000, cache_dir=None, cache_ndigits=4, use_tmp=True):
+                 cache_max=5000, cache_dir=None, cache_ndigits=4, use_tmp=True, run_tag=None):
         
         self.base_workdir = Path(base_workdir).resolve()
         self.base_workdir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +70,7 @@ class DustyRunner:
 
         self.cache_ndigits = int(cache_ndigits)
         self.use_tmp = bool(use_tmp)
+        self.run_tag = str(run_tag) if run_tag is not None else uuid.uuid4().hex[:10]
 
 
         self.logger = logger
@@ -176,8 +178,9 @@ class DustyRunner:
                 except Exception:
                     pass
         
-        pid_root = self.base_workdir / f"pid{os.getpid()}"
+        pid_root = self.base_workdir / f"{self.run_tag}" / f"pid{os.getpid()}"
         pid_root.mkdir(parents=True, exist_ok=True)
+
 
         if self.use_tmp:
             tmp_cm = tempfile.TemporaryDirectory(dir=str(pid_root), prefix="dusty_")
@@ -207,9 +210,7 @@ class DustyRunner:
         except Exception as e:
             if self.logger:
                 self.logger.error(f"Error running DUSTY in {run_dir}: {e}")
-            out = (None, None, None)
-            self._cache_set(ckey, out)
-            return out
+            return (None, None, None)
 
         finally:
             os.chdir(prev_cwd)
@@ -232,7 +233,9 @@ class DustyRunner:
         # save disk cache (optional)
         if dpath is not None:
             try:
-                np.savez_compressed(dpath, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+                tmp = dpath.with_suffix(dpath.suffix + f".tmp{os.getpid()}")
+                np.savez_compressed(tmp, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+                os.replace(tmp, dpath)   # atomic rename on same filesystem
             except Exception:
                 pass
 

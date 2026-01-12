@@ -186,7 +186,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      tstar_sigma_frac=0.3, tdust_sigma_frac=0.5, 
                      log10_tau_sigma=0.5, log10_a_sigma=1.0,
                      init_mode="hybrid", init_scales=None, progress_every=None,
-                     cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True):
+                     cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True,
+                     run_tag=None):
     """
     Run emcee for a given SED using DUSTY models.
 
@@ -207,7 +208,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                                cache_dir=cache_dir,
                                cache_ndigits=cache_ndigits,
                                cache_max=cache_max,
-                               use_tmp=use_tmp)
+                               use_tmp=use_tmp,
+                               run_tag=run_tag)
     
     # best-fit from grid
     best_row = grid_df.iloc[0]
