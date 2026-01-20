@@ -119,7 +119,7 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
                     ncol=4,
                 )
         else:
-            ax.legend(H, L, fontsize=9)
+            ax.legend(H, L, fontsize=9, loc='lower left')
 
     # optional inset LC
     if inset_lc is not None and isinstance(inset_lc, dict):

@@ -14,8 +14,8 @@ def _log_mix(lnN, w):
     # Uniform part is constant 0 inside bounds (already ensured); use logaddexp for stability.
     return np.logaddexp(np.log(w) + lnN, np.log(1.0 - w))
 
-def log_prior(theta, tstar_bounds=(2000., 12000.),
-              tdust_bounds=(100., 1500.),
+def log_prior(theta, tstar_bounds=(2000., 15000.),
+              tdust_bounds=(50., 1500.),
               log10_tau_bounds=(-4, 2.),
               log10_a_bounds=(-30., 30.),
               best=None, prior_mode="data", 

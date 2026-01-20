@@ -21,13 +21,13 @@ logfile="$logdir/$oid.log"
 
   # Make output line-buffered so you see progress in the log immediately
   stdbuf -oL -eL python -m lltypeiip.inference.run_sed_mcmc "$oid" \
-    --sweep \
-    --nsteps 2000 \
-    --burnin 500 \
-    --nwalkers 24 \
+    --mode mixture \
+    --nsteps 6000 \
+    --burnin 2000 \
+    --nwalkers 32 \
     --ncores "$ncores" \
     --mp fork \
-    --progress-every 100 \
+    --progress-every 250 \
     --workdir "$workdir" \
     --cache-dir "$cachedir" \
     --cache-ndigits 4 \

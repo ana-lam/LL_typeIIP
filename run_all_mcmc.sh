@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OIDS_FILE="sed_subsample.txt"
+OIDS_FILE="sed_sample.txt"
 LOGDIR="mcmc_logs"
 NJOBS=4
 NCORES=4

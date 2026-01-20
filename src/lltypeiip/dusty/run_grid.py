@@ -205,10 +205,11 @@ def main():
     # -----------------------------
 
     # Stellar temperature (K): cool photosphere range appropriate for your source
-    tstar_values = [3500, 3750, 4000, 4250, 4500, 4750, 5000, 5250, 5500, 5750, 6000, 6250, 6500, 6750, 7000, 7250, 7500]
+    tstar_values = [4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000,
+                    10500, 11000, 11500, 12000, 12500, 13000, 13500, 14000, 14500, 15000]
 
     # Inner dust temperature (K): warm silicate near sublimation
-    tdust_values = [450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
+    tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)
