@@ -702,7 +702,7 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             xlim=(None, None), ztf_flux=False, mode="stacked", scale_wise=True,
             baseline_ref="ztf", baseline_dt=100, ref_band="r", logy=False,
             savepath=None, ax=None, labels=True, mark_tail_start=False,
-            mark_plateau_end=False
+            mark_plateau_end=False,  mark_custom_mjd=None
         ):   
     """
     Plot ZTF + WISE light curves.
@@ -741,6 +741,24 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             yerr = np.minimum(yerr, y_clipped * 0.95)
             return y_clipped, yerr
         return y_clipped, None
+    
+    # helper for v lines
+    def vline_with_label(ax, x, label, *, y=0.02, dx_pts=-12,
+                     line_kw=None, text_kw=None):
+        line_kw = {} if line_kw is None else dict(line_kw)
+        text_kw = {} if text_kw is None else dict(text_kw)
+
+        ax.axvline(x, **line_kw)
+
+        ax.annotate(
+            label,
+            xy=(x, y), xycoords=ax.get_xaxis_transform(),   # x=data, y=axes fraction
+            xytext=(dx_pts, 0), textcoords="offset points", # fixed visual offset
+            rotation=90,
+            ha="center", va=("bottom" if y < 0.5 else "top"),
+            clip_on=False,
+            **text_kw
+        )
 
 
     # x-axis range
@@ -842,73 +860,105 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         fig.subplots_adjust(hspace=0.0)
         fig.suptitle(f"ZTF + WISE Light Curve: {oid}", fontsize=16, y=0.93)
 
-        if mark_tail_start:
-            params_path = Path(config.paths.params)
-            params = pd.read_csv(params_path)
-            m = params[['name', 'plateauend', 'tailstart']].dropna()
-            m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
-            if oid in m_dict:
-                tail_start = m_dict[oid]
-                ax1.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
-                ax1.text(
-                    tail_start-2,          # x position (data coords)
-                    0.95,                 # y as a fraction of the axes height
-                    "Tail Start",        # text
-                    rotation=90,          # vertical text
-                    va="top",             # align text relative to its position
-                    ha="center",
-                    fontsize=9,
-                    color="black",
-                    transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
-                    clip_on=False,
+        # if mark_tail_start:
+        #     params_path = Path(config.paths.params)
+        #     params = pd.read_csv(params_path)
+        #     m = params[['name', 'plateauend', 'tailstart']].dropna()
+        #     m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
+        #     if oid in m_dict:
+        #         tail_start = m_dict[oid]
+        #         ax1.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+        #         ax1.text(
+        #             tail_start-2,          # x position (data coords)
+        #             0.95,                 # y as a fraction of the axes height
+        #             "Tail Start",        # text
+        #             rotation=90,          # vertical text
+        #             va="top",             # align text relative to its position
+        #             ha="center",
+        #             fontsize=9,
+        #             color="black",
+        #             transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
+        #             clip_on=False,
+        #         )
+        #         ax2.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
+        #         ax2.text(
+        #             tail_start-2,          # x position (data coords)
+        #             0.95,                 # y as a fraction of the axes height
+        #             "Tail Start",        # text
+        #             rotation=90,          # vertical text
+        #             va="top",             # align text relative to its position
+        #             ha="center",
+        #             fontsize=9,
+        #             color="black",
+        #             transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
+        #             clip_on=False,
+        #         )
+
+        if mark_tail_start and oid in m_dict:
+            tail_start = m_dict[oid]
+            for ax in (ax1, ax2):
+                vline_with_label(
+                    ax, tail_start, "Tail Start",
+                    y=0.95, dx_pts=-10,
+                    line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                    text_kw=dict(fontsize=9, color="black"),
                 )
-                ax2.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
-                ax2.text(
-                    tail_start-2,          # x position (data coords)
-                    0.95,                 # y as a fraction of the axes height
-                    "Tail Start",        # text
-                    rotation=90,          # vertical text
-                    va="top",             # align text relative to its position
-                    ha="center",
-                    fontsize=9,
-                    color="black",
-                    transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
-                    clip_on=False,
-                )
+
         
-        if mark_plateau_end:
-            params_path = Path(config.paths.params)
-            params = pd.read_csv(params_path)
-            m = params[['name', 'plateauend', 'tailstart']].dropna()
-            m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
-            if oid in m_dict:
-                plateau_end = m_dict[oid]
-                ax1.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
-                ax2.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
-                ax1.text(
-                    plateau_end-2,          # x position (data coords)
-                    0.05,                 # y as a fraction of the axes height
-                    f"Plateau End ({plateau_end:.1f})",        # text
-                    rotation=90,          # vertical text
-                    va="bottom",             # align text relative to its position
-                    ha="center",
-                    fontsize=9,
-                    color="black",
-                    transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
-                    clip_on=False,
+        # if mark_plateau_end:
+        #     params_path = Path(config.paths.params)
+        #     params = pd.read_csv(params_path)
+        #     m = params[['name', 'plateauend', 'tailstart']].dropna()
+        #     m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
+        #     if oid in m_dict:
+        #         plateau_end = m_dict[oid]
+        #         ax1.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+        #         ax2.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+        #         ax1.text(
+        #             plateau_end-2,          # x position (data coords)
+        #             0.05,                 # y as a fraction of the axes height
+        #             f"Plateau End ({plateau_end:.1f})",        # text
+        #             rotation=90,          # vertical text
+        #             va="bottom",             # align text relative to its position
+        #             ha="center",
+        #             fontsize=9,
+        #             color="black",
+        #             transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
+        #             clip_on=False,
+        #         )
+        #         ax2.text(
+        #             plateau_end-2,          # x position (data coords)
+        #             0.05,                 # y as a fraction of the axes height
+        #             f"Plateau End ({plateau_end:.1f})",        # text
+        #             rotation=90,          # vertical text
+        #             va="bottom",             # align text relative to its position
+        #             ha="center",
+        #             fontsize=9,
+        #             color="black",
+        #             transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
+        #             clip_on=False,
+        #         )
+        if mark_plateau_end and oid in m_dict:
+            plateau_end = m_dict[oid]
+            for ax in (ax1, ax2):
+                vline_with_label(
+                    ax, plateau_end, f"Plateau End ({plateau_end:.1f})",
+                    y=0.05, dx_pts=-10,
+                    line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                    text_kw=dict(fontsize=9, color="black"),
                 )
-                ax2.text(
-                    plateau_end-2,          # x position (data coords)
-                    0.05,                 # y as a fraction of the axes height
-                    f"Plateau End ({plateau_end:.1f})",        # text
-                    rotation=90,          # vertical text
-                    va="bottom",             # align text relative to its position
-                    ha="center",
-                    fontsize=9,
-                    color="black",
-                    transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
-                    clip_on=False,
+
+
+        if mark_custom_mjd is not None:
+            for ax in (ax1, ax2):
+                vline_with_label(
+                    ax, mark_custom_mjd, f"SED ({mark_custom_mjd:.1f})",
+                    y=0.2, dx_pts=-12,
+                    line_kw=dict(color="red", alpha=0.7),
+                    text_kw=dict(fontsize=9, color="black"),
                 )
+
+
 
         if savepath:
             plt.savefig(savepath, format="pdf", bbox_inches="tight")
@@ -1031,17 +1081,24 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 else:
                     ax.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
                 if labels:
-                    ax.text(
-                        tail_start-2,          # x position (data coords)
-                        0.05,                 # y as a fraction of the axes height
-                        f"Tail Start ({tail_start:.1f})",        # text
-                        rotation=90,          # vertical text
-                        va="bottom",             # align text relative to its position
-                        ha="center",
-                        fontsize=9,
-                        color="black",
-                        transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
-                        clip_on=False,
+                    # ax.text(
+                    #     tail_start-4,          # x position (data coords)
+                    #     0.02,                 # y as a fraction of the axes height
+                    #     f"Tail Start",        # text
+                    #     rotation=90,          # vertical text
+                    #     va="bottom",             # align text relative to its position
+                    #     ha="center",
+                    #     fontsize=9,
+                    #     color="black",
+                    #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
+                    #     clip_on=False,
+                    # )
+                    plateau_end = m_dict[oid]
+                    vline_with_label(
+                        ax, tail_start, "Tail Start",
+                        y=0.02, dx_pts=-5,
+                        line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                        text_kw=dict(fontsize=9, color="black"),
                     )
         
         if mark_plateau_end:
@@ -1056,21 +1113,50 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 else:
                     ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
                 if labels:
-                    ax.text(
-                        plateau_end-2,          # x position (data coords)
-                        0.05,                 # y as a fraction of the axes height
-                        f"Plateau End ({plateau_end:.1f})",        # text
-                        rotation=90,          # vertical text
-                        va="bottom",             # align text relative to its position
-                        ha="center",
-                        fontsize=9,
-                        color="black",
-                        transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
-                        clip_on=False,
+                    # ax.text(
+                    #     plateau_end-4,          # x position (data coords)
+                    #     0.02,                 # y as a fraction of the axes height
+                    #     f"Plateau End",        # text
+                    #     rotation=90,          # vertical text
+                    #     va="bottom",             # align text relative to its position
+                    #     ha="center",
+                    #     fontsize=9,
+                    #     color="black",
+                    #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
+                    #     clip_on=False,
+                    # )
+                    vline_with_label(
+                        ax, plateau_end, "Plateau End",
+                        y=0.02, dx_pts=-5,
+                        line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                        text_kw=dict(fontsize=9, color="black"),
                     )
 
+        if mark_custom_mjd is not None and labels:
+            # ax.axvline(mark_custom_mjd, color='red', alpha=0.7, linewidth=3.5)
+            # ax.text(
+            #     mark_custom_mjd-3.5,          # x position (data coords)
+            #     0.2,                 # y as a fraction of the axes height
+            #     f"SED MJD ({mark_custom_mjd:.0f})",        # text
+            #     rotation=90,          # vertical text
+            #     va="bottom",             # align text relative to its position
+            #     ha="center",
+            #     fontsize=10,
+            #     color="black",
+            #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
+            #     clip_on=False,
+            #     fontweight='bold'
+            # )
+            vline_with_label(
+                        ax, mark_custom_mjd, f"SED MJD ({mark_custom_mjd:.0f})",
+                        y=0.2, dx_pts=-10,
+                        line_kw=dict(color="red", alpha=0.7, linewidth=3.5),
+                        text_kw=dict(fontsize=10, color="black", fontweight='bold'),
+                    )
+            
+
         if savepath:
-            fig.savefig(savepath, format="pdf", bbox_inches="tight")
+            fig.savefig(savepath, bbox_inches="tight")
             print(f"Saved plot to {savepath}")
         elif created_ax:
             plt.show()
