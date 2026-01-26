@@ -4,6 +4,7 @@ import astropy.constants as const
 
 from ..config import config, SNR_MIN, SNR_MIN_WISE, LAM_EFF
 from ..photometry.wise import subtract_wise_parity_baseline
+from ..photometry.ztf import estimate_texp_mjd_from_forced
 
 
 def _merge_epochs(times, merge_dt=1.0):
@@ -212,6 +213,12 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
     combined_det_times = np.unique(np.concatenate([all_epochs, wise_det_times])) if all_epochs.size and wise_det_times.size else all_epochs if all_epochs.size else wise_det_times
     all_epochs = _merge_epochs(combined_det_times, merge_dt=merge_dt)
 
+    # estimate explosion time from forced photometry
+    t_exp_info = estimate_texp_mjd_from_forced(ztf_forced)
+    t_exp_mjd = t_exp_info['t_exp_mjd'] if t_exp_info else None
+    t_exp_sig = t_exp_info['sigma_mjd'] if t_exp_info else None
+    t_exp_band = t_exp_info['band'] if t_exp_info else None
+
     # ---- build SEDs -----
     seds = []
     for mjd0 in all_epochs:
@@ -219,6 +226,12 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
                         max_dt_ztf=max_dt_ztf, max_dt_wise=max_dt_wise,
                         include_limits=include_limits, snr_min=snr_min,
                         snr_min_wise=snr_min_wise)
+        
+        sed["t_exp_mjd"] = t_exp_mjd
+        sed["t_exp_sig"] = t_exp_sig
+        sed["t_exp_band"] = t_exp_band
+        sed["phase_days"] = (mjd0 - t_exp_mjd) if t_exp_mjd is not None else np.nan
+
         if sed["bands"] and _sed_has_required_detections(sed, 
                                                          require_wise_detetection=require_wise_detection, 
                                                          min_detected_bands=min_detected_bands):

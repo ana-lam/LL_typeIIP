@@ -314,3 +314,78 @@ def parse_forced_df(df):
             "limiting_mag": df.loc[mask, "diffmaglim"].values,
         }
     return resdict
+
+def estimate_texp_mjd_from_forced(res_forced, snr_det=5.0, snr_nd=2.0,
+                                  follwup_window=5.0, min_followup_dets=2,
+                                  prefer_filters=['ZTF_r', 'ZTF_g', 'ZTF_i']):
+    """
+    Estimate explosion time from forced photometry.
+    - Find first detection above snr_det and flux > 0 and require
+        it is part of a sustained rise (min_followup_dets within follwup_window days in the same band).
+    - Find last non-detection before that time with snr < snr_nd in the same band.
+    - Estimate t_exp as midpoint between last non-detection and first detection
+        t_exp = 0.5 * (t_nd + t_det)
+    """
+
+    best = None
+    
+    for band in prefer_filters:
+        if band not in res_forced:
+            continue
+        data = res_forced[band]
+        mjd = data['mjd']
+        flux = data['flux']
+        flux_err = data['flux_err']
+        
+        mask = np.isfinite(mjd) & np.isfinite(flux) & np.isfinite(flux_err) & (flux_err > 0)
+
+        if not np.any(mask):
+            continue
+
+        mjd, flux, flux_err = mjd[mask], flux[mask], flux_err[mask]
+
+        snr = flux / flux_err
+
+        order = np.argsort(mjd)
+        mjd, flux, flux_err, snr = mjd[order], flux[order], flux_err[order], snr[order]
+
+        det_mask = (snr >= snr_det) & (flux > 0)
+        if not np.any(det_mask):
+            continue
+
+        # find first detection with sustained rise
+        det_idx = np.where(det_mask)[0]
+        t_det = None
+        for idx in det_idx:
+            t0 = mjd[idx]
+            window_mask = (mjd >= t0) & (mjd <= t0 + follwup_window)
+            n_followup_dets = np.sum(det_mask & window_mask)
+            if n_followup_dets >= min_followup_dets:
+                t_det = t0
+                break
+
+        if t_det is None:
+            continue
+
+        pre_mask = mjd < t_det
+        if not np.any(pre_mask):
+            continue
+
+        nd_mask = (snr <= snr_nd) & pre_mask
+        if np.any(nd_mask):
+            t_nd = mjd[np.where(nd_mask)[0][-1]]
+        else:
+            t_nd = mjd[np.where(pre_mask)[0][-1]]
+
+        dt = t_det - t_nd
+        if dt <= 0:
+            continue
+
+        cand = dict(band=band, t_nd_mjd=float(t_nd), t_det_mjd=float(t_det),
+                    t_exp_mjd=float(0.5 * (t_nd + t_det)), sigma_mjd=float(0.5*dt),
+                    dt=float(dt))
+    
+        if best is None or cand['dt'] < best['dt']:
+            best = cand
+
+    return best

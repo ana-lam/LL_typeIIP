@@ -245,8 +245,8 @@ def main():
     dust_type = Parameter(name="dust_type", value=args.dtype)
 
     # Bounds metadata
-    tstarmin = Parameter(name="tstarmin", value=3000)
-    tstarmax = Parameter(name="tstarmax", value=10000)
+    tstarmin = Parameter(name="tstarmin", value=1000)
+    tstarmax = Parameter(name="tstarmax", value=15000)
 
     custom_grain_distribution = Parameter(name="custom_grain_distribution", value=False)
     tau_wav_micron = Parameter(name="tau_wav", value=args.tau_wav_micron, is_variable=False)

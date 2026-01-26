@@ -5,8 +5,8 @@ import shutil
 import stat
 from pathlib import Path
 import numpy as np
-from pydusty.dusty import Dusty, DustyParameters
-from pydusty.parameters import Parameter
+from pydusty.dusty import Dusty, DustyCustomInputSpectrum
+from pydusty.parameters import Parameter, DustyParameters
 from astropy.io import ascii
 import tempfile
 from collections import OrderedDict
@@ -76,19 +76,30 @@ class DustyRunner:
         self.logger = logger
         self.quiet = quiet
 
-    def _canonical_key(self, tstar, tdust, tau, shell_thickness):
+    def _canonical_key(self, tstar, tdust, tau, shell_thickness, phase_days=None, template_tag=None):
             """Quantize parameters so cache hits happen."""
             tstar_i = int(round(float(tstar)))
             tdust_i = int(round(float(tdust)))
             tau_f = round(float(tau), self.cache_ndigits)
             thick_f = round(float(shell_thickness), self.cache_ndigits)
-            return (tstar_i, tdust_i, tau_f, thick_f)
+
+            if phase_days is None:
+                return (tstar_i, tdust_i, tau_f, thick_f)
+            
+            phase_f = round(float(phase_days), 2)
+            tag = str(template_tag) if template_tag is not None else "tmpl"
+            
+            return (tstar_i, tdust_i, tau_f, thick_f, phase_f, tag)
 
     @staticmethod
     def _leaf_from_ckey(ckey):
-        tstar_i, tdust_i, tau_f, thick_f = ckey
-        leaf = f"Tstar_{tstar_i}_Tdust_{tdust_i}_tau_{tau_f}_thick_{thick_f}".replace(".", "_")
-        return leaf
+        if len(ckey) == 4:
+            tstar_i, tdust_i, tau_f, thick_f = ckey
+            leaf = f"Tstar_{tstar_i}_Tdust_{tdust_i}_tau_{tau_f}_thick_{thick_f}".replace(".", "_")
+        else:
+            tstar_i, tdust_i, tau_f, thick_f, phase_f, tag = ckey
+            leaf = f"Tstar_{tstar_i}_Tdust_{tdust_i}_tau_{tau_f}_thick_{thick_f}_{tag}_phase_{phase_f}"
+        return leaf.replace(".", "_")
     
     def _cache_get(self, ckey):
         if ckey in self._cache:
@@ -108,13 +119,16 @@ class DustyRunner:
         leaf = self._leaf_from_ckey(ckey)
         return self.cache_dir / f"{leaf}.npz"
     
-    def _build_parameters(self, tstar, tdust, tau, shell_thickness):
+    def _build_parameters(self, tstar, tdust, tau, shell_thickness, spectrum_file=None):
         
         p_tstar = Parameter(name="tstar", value=float(tstar), is_variable=False)
         p_tdust = Parameter(name="tdust", value=float(tdust), is_variable=False)
         p_tau   = Parameter(name="tau",   value=float(tau),   is_variable=False)
 
-        p_blackbody = Parameter(name="blackbody", value=self.blackbody_val)
+        # if using custom input spectrum file blackbody is false
+        bb_val = self.blackbody_val if spectrum_file is None else False
+        p_blackbody = Parameter(name="blackbody", value=bb_val, is_variable=False)
+
         p_shell_thickness = Parameter(name="shell_thickness", value=float(shell_thickness))
 
         p_dust_type = Parameter(name="dust_type", value=self.dust_type_str)
@@ -130,6 +144,14 @@ class DustyRunner:
             name="tau_wav", value=self.tau_wavelength_microns_val, is_variable=False
         )
 
+        p_custom_input = None
+        if spectrum_file is not None:
+            p_custom_input = Parameter(
+                name="custom_input_spectrum_file",
+                value=str(spectrum_file),
+                is_variable=False
+            )
+
         dusty_params = DustyParameters(
             tstar=p_tstar,
             tdust=p_tdust,
@@ -141,19 +163,62 @@ class DustyRunner:
             tstarmax=p_tstarmax,
             custom_grain_distribution=p_custom_grain_distribution,
             tau_wavelength_microns=p_tau_wav_micron,
+            custom_input_spectrum_file=p_custom_input
         )
+
         return dusty_params
     
-    def evaluate_model(self, tstar, tdust, tau, shell_thickness=None):
+    def _write_dusty_input_spectrum(self, run_dir, phase_days, lam_um, flam):
+        """
+        Write a DUSTY Spectrum=5 file: 3 header lines + columns (lambda_um, F_lambda).
+        """
+        lam_um = np.asarray(lam_um, float)
+        f_lam = np.asarray(flam, float)
+
+        mask = np.isfinite(lam_um) & np.isfinite(f_lam) & (lam_um > 0)
+        lam_um = lam_um[mask]
+        f_lam = f_lam[mask]
+
+        s = np.argsort(lam_um)
+        lam_um = lam_um[s]
+        f_lam = f_lam[s]
+
+        # normalization
+        area = np.trapezoid(f_lam, lam_um)
+        if area > 0:
+            f_lam /= area
+
+        fname = f"input_spec_phase_{phase_days:.2f}.dat".replace(".", "_")
+        path = run_dir / fname
+        with open(path, "w") as f:
+            f.write("Nugent Type IIP template\n")
+            f.write(f"Phase (days) = {phase_days:.2f}\n")
+            f.write("lambda_um  F_lambda\n")
+            for lamv, flxv in zip(lam_um, f_lam):
+                f.write(f"{lamv:.8e} {flxv:.8e}\n")
+        
+        return fname
+
+    
+    def evaluate_model(self, tstar, tdust, tau, shell_thickness=None,
+                       template=None, phase_days=None, template_tag="nugent_iip"):
         """
         Run DUSTY (or load from cache/disk) and return (lam_um, lamFlam, r1).
+
+        If template and phase_days are provided, use DustyCustomInputSpectrum with Spectrum=5.
 
         theta: (tstar, tdust, tau[, shell_thickness])
         """
         if shell_thickness is None:
             shell_thickness = self.shell_thickness_fixed
 
-        ckey = self._canonical_key(tstar, tdust, tau, shell_thickness)
+        use_template = (template is not None) and (phase_days is not None)
+
+        ckey = self._canonical_key(tstar, tdust, tau, shell_thickness,
+                                   phase_days=(phase_days if use_template else None),
+                                   template_tag=(template_tag if use_template else None),
+                                   )
+        
 
         # check in-memory cache
         hit = self._cache_get(ckey)
@@ -193,9 +258,21 @@ class DustyRunner:
 
         prev_cwd = os.getcwd()
         try:
-            dusty_params = self._build_parameters(*ckey)
+            spectrum_file = None
+            runner_cls = Dusty
+
+            if use_template:
+                lam_um_src, f_lam_src = template.spectrum_at(phase_days)
+                spectrum_file = self._write_dusty_input_spectrum(run_dir, phase_days, lam_um_src, f_lam_src)
+                runner_cls = DustyCustomInputSpectrum
+                
+            dusty_params = self._build_parameters(
+                                tstar, tdust, tau, shell_thickness,
+                                spectrum_file=spectrum_file
+                            )
+            
             with silence_fds():
-                runner = Dusty(
+                runner = runner_cls(
                     parameters=dusty_params,
                     dusty_working_directory=str(run_dir),
                     dusty_file_directory=self.dusty_file_dir,
