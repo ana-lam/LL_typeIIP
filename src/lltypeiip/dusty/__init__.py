@@ -1,6 +1,6 @@
 from .runner import DustyRunner, silence_fds
 from .model import DustyModel, load_dusty_grid
-from .scaling import compute_chi2, fit_scale_to_sed, fit_grid_to_sed
+from .scaling import compute_chi2, fit_scale_to_sed, fit_grid_to_sed, fit_template_grid_to_sed
 from .plotting import plot_best_fit_dusty_model
 
 __all__ = [
@@ -13,7 +13,8 @@ __all__ = [
     # Scaling and fitting
     'fit_scale_to_sed',
     'fit_grid_to_sed',
+    'fit_template_grid_to_sed',
     'compute_chi2',
     # Plotting
-    plot_best_fit_dusty_model
+    'plot_best_fit_dusty_model'
 ]

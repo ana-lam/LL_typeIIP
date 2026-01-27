@@ -188,14 +188,13 @@ class DustyRunner:
         if area > 0:
             f_lam /= area
 
-        fname = f"input_spec_phase_{phase_days:.2f}.dat".replace(".", "_")
+        phase_i = int(round(float(phase_days) * 100.0))
+        fname = f"input_spec_phase_{phase_i:06d}.dat"
         path = run_dir / fname
+
         with open(path, "w") as f:
-            f.write("Nugent Type IIP template\n")
-            f.write(f"Phase (days) = {phase_days:.2f}\n")
-            f.write("lambda_um  F_lambda\n")
-            for lamv, flxv in zip(lam_um, f_lam):
-                f.write(f"{lamv:.8e} {flxv:.8e}\n")
+            for x, y in zip(lam_um, f_lam):
+                f.write(f"{x:.8e} {y:.8e}\n")
         
         return fname
 

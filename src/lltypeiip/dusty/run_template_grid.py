@@ -108,13 +108,16 @@ def run_single_sed(job):
     Worker: evaluate grid for one SED epoch and return list of result rows.
     Mirrors run_grid.py idea of "unit of work", but per-SED instead of per-model folder.
     """
-    (sed,
-     tdust_values, tau_values, thick_values,
-     tstar_dummy, template_path, template_tag,
-     y_mode, use_weights,
-     runner_kwargs, runner_sig) = job
+    ((sed, sed_source),
+    tdust_values, tau_values, thick_values,
+    tstar_dummy, template_path, template_tag,
+    y_mode, use_weights,
+    runner_kwargs, runner_sig) = job
 
-    phase = sed.get("phase_days", None)
+    if "sed" in sed and isinstance(sed["sed"], dict):
+        sed = sed["sed"]
+
+    phase = sed.get("phase_days", sed.get("phase", None))
     mjd = sed.get("mjd", np.nan)
     oid = sed.get("oid", "unknown")
 
@@ -148,6 +151,7 @@ def run_single_sed(job):
 
         rows.append(dict(
             oid=str(oid),
+            sed_source=str(sed_source),
             mjd=float(mjd),
             phase_days=float(phase),
             template_tag=str(template_tag),
@@ -177,9 +181,13 @@ def main():
                         help="Tag to record in output rows.")
     
     # SED input
-    parser.add_argument("--seds_pkl", type=str, required=True,
-                        help="Pickle file containing list of SED dicts (each must have phase_days).")
-    
+    parser.add_argument("--seds_pkl", type=str, default=None,
+                    help="Pickle containing a single SED dict OR a list of SED dicts.")
+    parser.add_argument("--sed_pickle_dir", type=str, default=None,
+                        help="Directory containing *_tail_sed.pkl files (one SED dict per file).")
+    parser.add_argument("--glob", type=str, default="*_tail_sed.pkl",
+                        help="Glob used inside --sed_pickle_dir. Default '*_tail_sed.pkl'.")
+
     # output
     parser.add_argument("workdir", type=str,
                         help="Directory used for DUSTY work + caches + outputs.")
@@ -256,12 +264,65 @@ def main():
     # -----------------------------
     # Load SEDs
     # -----------------------------
-    seds_p = Path(args.seds_pkl).resolve()
-    with open(seds_p, "rb") as f:
-        seds = pickle.load(f)
+    sed_inputs = []
+    if args.sed_pickle_dir is not None:
+        sed_dir = Path(args.sed_pickle_dir).resolve()
+        if not sed_dir.exists():
+            raise FileNotFoundError(f"--sed_pickle_dir not found: {sed_dir}")
 
-    if not isinstance(seds, (list, tuple)) or len(seds) == 0:
-        raise RuntimeError("seds_pkl did not contain a non-empty list of SED dicts.")
+        pkl_paths = sorted(sed_dir.glob(args.glob))
+        if not pkl_paths:
+            raise RuntimeError(f"No files matching {args.glob} in {sed_dir}")
+
+        for p in pkl_paths:
+            with open(p, "rb") as f:
+                obj = pickle.load(f)
+
+            if not isinstance(obj, dict):
+                raise RuntimeError(f"{p.name} did not contain a single SED dict.")
+
+            if "sed" in obj and isinstance(obj["sed"], dict):
+                sed = obj["sed"].copy()
+
+                sed["oid"] = obj.get("oid", sed.get("oid", "unknown"))
+                sed["mjd"] = obj.get("mjd", sed.get("mjd", np.nan))
+
+                if "phase_days" not in sed or not np.isfinite(float(sed.get("phase_days", np.nan))):
+                    if "phase" in obj and np.isfinite(float(obj["phase"])):
+                        sed["phase_days"] = float(obj["phase"])
+
+                for k in ["t_exp_mjd", "t_exp_sig", "t_exp_band"]:
+                    if k in obj and k not in sed:
+                        sed[k] = obj[k]
+
+                sed_inputs.append((sed, str(p)))
+            else:
+                sed_inputs.append((obj, str(p)))
+
+    else:
+        if args.seds_pkl is None:
+            raise RuntimeError("Provide either --sed_pickle_dir or --seds_pkl.")
+
+        seds_p = Path(args.seds_pkl).resolve()
+        with open(seds_p, "rb") as f:
+            obj = pickle.load(f)
+
+        if isinstance(obj, dict):
+            sed_inputs.append((obj, str(seds_p)))
+        elif isinstance(obj, (list, tuple)):
+            for i, sed in enumerate(obj):
+                if not isinstance(sed, dict):
+                    raise RuntimeError(f"Element {i} in {seds_p.name} is not a dict.")
+                sed_inputs.append((sed, f"{seds_p}#{i}"))
+        else:
+            raise RuntimeError("seds_pkl must contain a dict or a list of dicts.")
+
+    if not sed_inputs:
+        raise RuntimeError("No SEDs loaded.")
+
+
+    # if not isinstance(seds, (list, tuple)) or len(seds) == 0:
+    #     raise RuntimeError("seds_pkl did not contain a non-empty list of SED dicts.")
 
     # --------------
     # Build grids 
@@ -269,12 +330,12 @@ def main():
     if args.tdust_list:
         tdust_values = _parse_list(args.tdust_list)
     else:
-        tdust_values = [200, 300, 400, 500, 600, 700, 800, 900, 1000]
+        tdust_values = [200, 400, 600, 800, 1000]
 
     if args.tau_list:
         tau_values = _parse_list(args.tau_list)
     else:
-        tau_values = [1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 3.0]
+        tau_values = [1e-3, 1e-2, 1e-1, 0.3, 1.0, 3.0]
 
     thick_values = _parse_list(args.thick_list)
 
@@ -310,13 +371,13 @@ def main():
     # Parallel execution
     # --------------------
     jobs = []
-    for sed in seds:
+    for sed_pair in sed_inputs:
         jobs.append(
-            (sed,
-             tdust_values, tau_values, thick_values,
-             float(args.tstar_dummy), str(Path(args.template_path).resolve()), args.template_tag,
-             args.y_mode, bool(args.use_weights),
-             runner_kwargs, runner_sig)
+            (sed_pair,
+            tdust_values, tau_values, thick_values,
+            float(args.tstar_dummy), str(Path(args.template_path).resolve()), args.template_tag,
+            args.y_mode, bool(args.use_weights),
+            runner_kwargs, runner_sig)
         )
 
     max_workers = min(os.cpu_count() or 2, int(args.n_workers))
@@ -345,7 +406,7 @@ def main():
 
     df.to_csv(out_csv, index=False)
 
-    best = df.groupby(["oid", "mjd"], as_index=False).first()
+    best = df.groupby(["oid"], as_index=False).first()
     best_csv = out_csv.with_name(out_csv.stem + "_best_per_epoch.csv")
     best.to_csv(best_csv, index=False)
 
