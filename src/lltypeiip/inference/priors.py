@@ -32,27 +32,43 @@ def log_prior(theta, tstar_bounds=(2000., 15000.), #1000, 15000.
             p = mix_weight * anchored + (1-mix_weight) * data-driven
     """
 
-    if len(theta) != 4:
-        print("Error: theta must have 4 elements (tstar, tdust, log10_tau, log10_a)")
-        tstar, tdust, log10_tau = theta
-        log10_a = None
-    else:
+    theta = np.asarray(theta, float)
+
+    # if len(theta) != 4:
+    #     print("Error: theta must have 4 elements (tstar, tdust, log10_tau, log10_a)")
+    #     tstar, tdust, log10_tau = theta
+    #     log10_a = None
+    # else:
+    #     tstar, tdust, log10_tau, log10_a = theta
+
+    if theta.size == 4:
         tstar, tdust, log10_tau, log10_a = theta
+        use_tstar = True
+    # do not sample Tstar for Spectrum=5
+    elif theta.size == 3:
+        tdust, log10_tau, log10_a = theta
+        tstar = None
+        use_tstar = False
+    else:
+        return -np.inf
 
     lp = 0.0
-    lp += _log_uniform_within(tstar, tstar_bounds)
-    if not np.isfinite(lp):
-        return -np.inf
+    if use_tstar:
+        lp += _log_uniform_within(tstar, tstar_bounds)
+        if not np.isfinite(lp):
+            return -np.inf
+
     lp += _log_uniform_within(tdust, tdust_bounds)
     if not np.isfinite(lp):
         return -np.inf
+
     lp += _log_uniform_within(log10_tau, log10_tau_bounds)
     if not np.isfinite(lp):
         return -np.inf
-    if log10_a is not None:
-        lp += _log_uniform_within(log10_a, log10_a_bounds)
-        if not np.isfinite(lp):
-            return -np.inf
+
+    lp += _log_uniform_within(log10_a, log10_a_bounds)
+    if not np.isfinite(lp):
+        return -np.inf
 
     if prior_mode == "data":
         return 0.0
@@ -61,10 +77,14 @@ def log_prior(theta, tstar_bounds=(2000., 15000.), #1000, 15000.
         raise ValueError("best parameter values must be provided for anchored or mixture priors")
     
     # resolve sigmas
-    tstar_sigma = (tstar_sigma_frac * best["tstar"]) if (tstar_sigma_frac is not None) else None
+    if use_tstar:
+        tstar_sigma = (tstar_sigma_frac * best["tstar"]) if (tstar_sigma_frac is not None) else None
     tdust_sigma = (tdust_sigma_frac * best["tdust"]) if (tdust_sigma_frac is not None) else None
 
-    ln_tstar = _log_normal(tstar, best["tstar"], tstar_sigma)
+    if use_tstar:
+        ln_tstar = _log_normal(tstar, best["tstar"], tstar_sigma)
+    else:
+        ln_tstar = 0.0
     ln_tdust = _log_normal(tdust, best["tdust"], tdust_sigma)
     ln_log10_tau = _log_normal(log10_tau, best["log10_tau"], log10_tau_sigma)
     ln_log10_a = _log_normal(log10_a, best["log10_a"], log10_a_sigma)

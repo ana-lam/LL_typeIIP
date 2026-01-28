@@ -12,7 +12,8 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
                               y_padding_frac=0.5, logx=True, logy=True, secax=False,
                               savepath=None, mcmc_results=None, dusty_runner=None,
                               mcmc_sample_mode="map", inset_lc=False, ztf_resdict=None,
-                              wise_resdict=None, inset_options=None):
+                              wise_resdict=None, inset_options=None, template=None,
+                              template_tag="nugent_iip"):
     """
     Plot the best N models (after scaling) over the SED and optionally overlay
     best fit from MCMC results.
@@ -72,7 +73,7 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
     if mcmc_results is not None and dusty_runner is not None:
         samples = mcmc_results['samples']
         logp = mcmc_results['log_prob']
-
+        
         if mcmc_sample_mode == "median":
             # medians across posterior
             tstar_m = np.median(samples[:, 0])
@@ -89,7 +90,20 @@ def plot_best_fit_dusty_model(sed, df, y_mode="Flam", top_n=3, keep_sed_limits=F
         
         tau_m = 10.0**log10_tau_m
         a_m = 10.0**log10_a_m
-        lam_um_m, lamFlam_m, r1_m = dusty_runner.evaluate_model(tstar_m, tdust_m, tau_m)
+
+        phase = sed.get("phase_days", sed.get("phase", None))
+
+        if template is None:
+            lam_um_m, lamFlam_m, r1_m = dusty_runner.evaluate_model(tstar_m, tdust_m, tau_m)
+        else:
+            lam_um_m, lamFlam_m, r1_m = dusty_runner.evaluate_model(
+                tstar=tstar_m,
+                tdust=tdust_m,
+                tau=tau_m,
+                template=template,
+                phase_days=phase,
+                template_tag=template_tag
+                )                
         
         if lam_um_m is not None:
             # get analytic scale and chi^2 in the same way as grid models

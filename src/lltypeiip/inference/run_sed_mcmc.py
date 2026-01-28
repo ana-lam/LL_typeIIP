@@ -5,6 +5,9 @@ import argparse
 import os
 import numpy as np
 from pathlib import Path
+import pickle
+import pandas as pd
+
 
 from ..sed import build_multi_epoch_seds_from_tail
 from .mcmc import run_mcmc_for_sed
@@ -24,6 +27,18 @@ def parse_args():
 
     # required
     p.add_argument("oid", type=str, help="ZTF object ID (e.g. ZTF22abtspsw)")
+
+    # template mode
+    p.add_argument("--template-path", type=str, default=None,
+                   help="If set: use Spectrum=5 template mode.")
+    p.add_argument("--template-tag", type=str, default="nugent_iip")
+    p.add_argument("--template-grid-csv", type=str, default=None,
+                   help="CSV from run_template_grid.py (full rows), used to pick best row for initialization.")
+    p.add_argument("--tstar-dummy", type=float, default=6000.0)
+
+    # optionally load one saved sed pickle instead of rebuilding
+    p.add_argument("--sed-pkl", type=str, default=None,
+                   help="Optional: path to a saved tail_sed pickle. Can be plain SED dict or payload with key 'sed'.")
 
     # sampler params
     p.add_argument("--sweep", action="store_true",
@@ -57,11 +72,22 @@ def parse_args():
 
     return p.parse_args()
 
+def _unwrap_sed(obj):
+    if isinstance(obj, dict) and "sed" in obj and isinstance(obj["sed"], dict):
+        sed = obj["sed"]
+        if "phase_days" not in sed and "phase" in obj:
+            sed["phase_days"] = obj["phase"]
+        return sed
+    return obj
+
 def main():
     
     args = parse_args()
 
     oid = args.oid
+
+    template_mode = (args.template_path is not None)
+
     print(f"Running MCMC for OID: {oid}")
     print(f"Posterior mode: {args.mode}")
 
@@ -76,45 +102,74 @@ def main():
     print(f"Grid directory: {grid_dir}")
 
     # photometry stuff
-    alerce = Alerce()
+    if args.sed_pkl:
+        with open(Path(args.sed_pkl).resolve(), "rb") as f:
+            obj = pickle.load(f)
+        sed = _unwrap_sed(obj)
+        if sed.get("oid", oid) != oid:
+            print(f"[warn] sed oid={sed.get('oid')} but CLI oid={oid}")
+        if "phase_days" not in sed and template_mode:
+            raise RuntimeError("Template mode needs sed['phase_days']. Your pickle doesn't include it.")
+    else:
+        alerce = Alerce()
 
-    wise_resdict = get_wise_lc_data(oid)
-    ztf_resdict = get_ztf_lc_data(
-        oid, alerce, doLC=False, doStamps=False, add_forced=True
-    )
-    ztf_resdict = convert_ZTF_mag_mJy(ztf_resdict, forced=True)
+        wise_resdict = get_wise_lc_data(oid)
+        ztf_resdict = get_ztf_lc_data(
+            oid, alerce, doLC=False, doStamps=False, add_forced=True
+        )
+        ztf_resdict = convert_ZTF_mag_mJy(ztf_resdict, forced=True)
 
-    # sed stuff
-    seds = build_multi_epoch_seds_from_tail(
-        ztf_resdict,
-        wise_resdict,
-        min_detected_bands=4,
-        require_wise_detection=True,
-        max_dt_ztf=5.0,
-        max_dt_wise=5.0
-    )
+        # sed stuff
+        seds = build_multi_epoch_seds_from_tail(
+            ztf_resdict,
+            wise_resdict,
+            min_detected_bands=4,
+            require_wise_detection=True,
+            max_dt_ztf=5.0,
+            max_dt_wise=5.0
+        )
 
-    if len(seds) == 0:
-        raise RuntimeError("No valid SEDs constructed (WISE detection required).")
+        if len(seds) == 0:
+            raise RuntimeError("No valid SEDs constructed (WISE detection required).")
 
-    if len(seds) > 0:
-        print(f"  Found {len(seds)} SED tail epochs with WISE detections for {oid}:")
-        print("\n".join(
-            [f"  MJD {sed['mjd']:.2f}, bands: {list(sed['bands'])}" for sed in seds]
-        ))
-        best = max(seds, key=lambda sed: (len(sed["bands"]), sed["mjd"]))
-        sed = best
+        if len(seds) > 0:
+            print(f"  Found {len(seds)} SED tail epochs with WISE detections for {oid}:")
+            print("\n".join(
+                [f"  MJD {sed['mjd']:.2f}, bands: {list(sed['bands'])}" for sed in seds]
+            ))
+            best = max(seds, key=lambda sed: (len(sed["bands"]), sed["mjd"]))
+            sed = best
     
-    print(f"Using SED epoch at MJD ~ {np.nanmean(sed['mjd']):.1f}")
+    print(f"Using SED epoch: oid={sed.get('oid')} mjd={float(sed['mjd']):.3f} bands={sed.get('bands')}")
+    if template_mode:
+        print(f"Template mode phase_days={sed.get('phase_days')} template={args.template_tag}")
 
     # grid fitting
     print("Running grid fit...")
-    df = fit_grid_to_sed(
-        grid_dir,
-        sed,
-        y_mode="Flam",
-        use_weights=True
-    )
+
+    if template_mode:
+        if args.template_grid_csv is None:
+            raise RuntimeError("Template mode requires --template-grid-csv from run_template_grid.py")
+
+        df_all = pd.read_csv(Path(args.template_grid_csv).resolve())
+        df_oid = df_all[df_all["oid"].astype(str) == str(oid)].copy()
+        if df_oid.empty:
+            raise RuntimeError(f"No rows for oid={oid} found in {args.template_grid_csv}")
+
+        df_oid = df_oid.sort_values("chi2_red")
+        df = df_oid  # pass into run_mcmc_for_sed, it uses df.iloc[0] as best
+        shell_thickness = float(df.iloc[0].get("shell_thickness", 2.0))
+        dust_type = str(df.iloc[0].get("dust_type", "silicate")) if "dust_type" in df.columns else "silicate"
+    else:
+        df = fit_grid_to_sed(
+            grid_dir,
+            sed,
+            y_mode="Flam",
+            use_weights=True
+        )
+        shell_thickness = 2.0
+        dust_type = "silicate"
+
 
     # MCMC 
     print("Starting MCMC...")
@@ -147,12 +202,17 @@ def main():
 
     for mode in modes:
         print(f"\n=== Running mode: {mode} ===", flush=True)
-        run_tag = f"{oid}_{mode}_seed{args.seed}"
+        run_tag = f"{oid}_{('tmpl' if template_mode else 'bb')}_{mode}_seed{args.seed}"
         results = run_mcmc_for_sed(
             sed=sed,
             grid_df=df,
             dusty_file_dir=dusty_file_dir,
             workdir=workdir,
+            dust_type=dust_type,
+            shell_thickness=shell_thickness,
+            template_path=(args.template_path if template_mode else None),
+            template_tag=args.template_tag,
+            tstar_dummy=float(args.tstar_dummy),
             nwalkers=args.nwalkers,
             nsteps=args.nsteps,
             burn_in=args.burnin,
@@ -169,7 +229,7 @@ def main():
         )
 
         suffix = "" if args.seed == 42 else f"_seed{args.seed}"
-        outname = f"mcmc_{oid}_{mode}{suffix}.npz"
+        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_{mode}{suffix}.npz"
         outpath = outdir / outname
 
         np.savez(
@@ -188,6 +248,8 @@ def main():
             prior_config=results["prior_config"],
             seed=args.seed,
             mode=mode,
+            template_mode=results.get("template_mode", False),
+            template_tag=results.get("template_tag", ""),
         )
 
         print(f"Saved results to: {outpath}")
