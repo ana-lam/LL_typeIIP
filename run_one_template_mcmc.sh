@@ -14,7 +14,6 @@ TEMPLATE_GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_gri
 
 # ---- work/cache ----
 workdir="/tmp/lltypeiip_dusty_work_template/${oid}"
-cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/cache_template_${TEMPLATE_TAG}"
 
 mkdir -p "$workdir" "$logdir" "$cachedir"
 
@@ -42,12 +41,12 @@ sed_pkl="${TAIL_SED_DIR}/${oid}_tail_sed.pkl"
     --template-grid-csv "$TEMPLATE_GRID_CSV" \
     --tstar-dummy 6000 \
     --mode mixture \
-    --nsteps 6000 \
-    --burnin 2000 \
+    --nsteps 10000 \
+    --burnin 3000 \
     --nwalkers 32 \
     --ncores "$ncores" \
     --mp fork \
-    --progress-every 250 \
+    --progress-every 500 \
     --workdir "$workdir" \
     --cache-dir "$cachedir" \
     --cache-ndigits 4 \

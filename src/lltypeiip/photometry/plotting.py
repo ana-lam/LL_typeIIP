@@ -944,12 +944,13 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 vline_with_label(
                     ax, plateau_end, f"Plateau End ({plateau_end:.1f})",
                     y=0.05, dx_pts=-10,
-                    line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                    line_kw=dict(color="black", linestyle="-.", alpha=0.7),
                     text_kw=dict(fontsize=9, color="black"),
                 )
 
 
         if mark_custom_mjd is not None:
+            print(f"Marking custom MJD: {mark_custom_mjd}")
             for ax in (ax1, ax2):
                 vline_with_label(
                     ax, mark_custom_mjd, f"SED ({mark_custom_mjd:.1f})",
@@ -1109,9 +1110,9 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             if oid in m_dict:
                 plateau_end = m_dict[oid]
                 if not labels:
-                    ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7, linewidth=1.3)
+                    ax.axvline(plateau_end, color='black', linestyle='-.', alpha=0.7, linewidth=1.3)
                 else:
-                    ax.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
+                    ax.axvline(plateau_end, color='black', linestyle='-.', alpha=0.7)
                 if labels:
                     # ax.text(
                     #     plateau_end-4,          # x position (data coords)
@@ -1128,11 +1129,11 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                     vline_with_label(
                         ax, plateau_end, "Plateau End",
                         y=0.02, dx_pts=-5,
-                        line_kw=dict(color="black", linestyle="--", alpha=0.7),
+                        line_kw=dict(color="black", linestyle="-.", alpha=0.7),
                         text_kw=dict(fontsize=9, color="black"),
                     )
 
-        if mark_custom_mjd is not None and labels:
+        if mark_custom_mjd is not None:
             # ax.axvline(mark_custom_mjd, color='red', alpha=0.7, linewidth=3.5)
             # ax.text(
             #     mark_custom_mjd-3.5,          # x position (data coords)
@@ -1147,12 +1148,15 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
             #     clip_on=False,
             #     fontweight='bold'
             # )
-            vline_with_label(
-                        ax, mark_custom_mjd, f"SED MJD ({mark_custom_mjd:.0f})",
-                        y=0.2, dx_pts=-10,
-                        line_kw=dict(color="red", alpha=0.7, linewidth=3.5),
-                        text_kw=dict(fontsize=10, color="black", fontweight='bold'),
-                    )
+            if labels:
+                vline_with_label(
+                            ax, mark_custom_mjd, f"SED MJD ({mark_custom_mjd:.0f})",
+                            y=0.2, dx_pts=-10,
+                            line_kw=dict(color="red", alpha=0.7, linewidth=3.5),
+                            text_kw=dict(fontsize=10, color="black", fontweight='bold'),
+                        )
+            else:
+                ax.axvline(mark_custom_mjd, color='red', alpha=0.7, linewidth=2.5, label=f"SED")
             
 
         if savepath:

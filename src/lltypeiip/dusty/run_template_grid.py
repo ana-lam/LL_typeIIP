@@ -8,23 +8,14 @@ os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 import argparse
 from pathlib import Path
 import numpy as np
-import csv
-import shutil
-import stat
-import re
 import pickle
 import pandas as pd
-from astropy import constants as const
 
 from ..config import config
-from ..sed.build import _prepare_sed_xy
 from ..dusty.runner import DustyRunner
 from ..dusty.custom_spectrum import NugentIIPSeries
 
-from pydusty.dusty import DustyCustomInputSpectrum
-from pydusty.parameters import Parameter, DustyParameters
 from pydusty.utils import getLogger
-
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import itertools as it
 
@@ -39,47 +30,32 @@ _G = {
     "runner_sig": None,
 }
 
+
 def _parse_list(s):
+    """Parse comma-separated list of floats."""
     return [float(x) for x in s.split(",") if x.strip()]
 
-def _ls_scale_and_chi2(lam_um, lamFlam, sed, y_mode="Flam", use_weights=True):
+
+def make_leaf_and_key(tstar, tdust, tau, thick, phase, template_tag, ndigits=4):
     """
-    Analytic best-fit scale and chi2 on the SED grid.
+    Canonical naming + canonical key for template-based models.
+    Mirrors run_grid.py's make_leaf_and_key but adds phase and template_tag.
     """
-    x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
+    tstar_i = int(round(float(tstar)))
+    tdust_i = int(round(float(tdust)))
+    tau_f = round(float(tau), ndigits)
+    thick_f = round(float(thick), ndigits)
+    phase_f = round(float(phase), 2)
+    tag = str(template_tag)
+    
+    leaf = (f"Tstar_{tstar_i}_Tdust_{tdust_i}_"
+            f"tau_{tau_f:.{ndigits}g}_thick_{thick_f:.{ndigits}g}_"
+            f"{tag}_phase_{phase_f:.2f}").replace('.', '_')
+    
+    key = (tstar_i, tdust_i, tau_f, thick_f, phase_f, tag)
+    
+    return leaf, key
 
-    if y_mode == "Flam":
-        x_mod = np.asarray(lam_um, float)
-        y_mod = np.asarray(lamFlam, float)
-    elif y_mode == "Fnu":
-        lam_cm = np.asarray(lam_um, float) * 1e-4
-        nu_mod = const.c.cgs.value / lam_cm
-        Fnu_mod = np.asarray(lamFlam, float) * (lam_cm / const.c.cgs.value)
-        order = np.argsort(nu_mod)
-        x_mod = nu_mod[order]
-        y_mod = Fnu_mod[order]
-    else:
-        raise ValueError("y_mode must be 'Flam' or 'Fnu'")
-
-    mask = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
-    if not np.any(mask):
-        return np.nan, np.inf
-
-    x_data = x_sed[mask]
-    y_data = y_sed[mask]
-    ey_data = ey_sed[mask]
-
-    y_mod_on_data = np.interp(x_data, x_mod, y_mod)
-
-    if use_weights and np.any(np.isfinite(ey_data)) and np.any(ey_data > 0):
-        w = 1.0 / np.clip(ey_data, 1e-99, np.inf) ** 2
-        a = np.sum(w * y_data * y_mod_on_data) / np.sum(w * y_mod_on_data ** 2)
-        chi2 = np.sum(w * (y_data - a * y_mod_on_data) ** 2)
-    else:
-        a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data ** 2)
-        chi2 = np.sum((y_data - a * y_mod_on_data) ** 2)
-
-    return float(a), float(chi2)
 
 def _get_template(template_path: str):
     """
@@ -92,89 +68,95 @@ def _get_template(template_path: str):
         _G["template_path"] = template_path
     return _G["template"]
 
-def _get_runner(args_sig: tuple, runner_kwargs: dict):
+
+def _get_runner(runner_sig: tuple, runner_kwargs: dict):
     """
     Create DustyRunner once per worker process.
     """
     global _G
-    if (_G["runner"] is None) or (_G["runner_sig"] != args_sig):
+    if (_G["runner"] is None) or (_G["runner_sig"] != runner_sig):
         _G["runner"] = DustyRunner(**runner_kwargs)
-        _G["runner_sig"] = args_sig
+        _G["runner_sig"] = runner_sig
     return _G["runner"]
 
 
-def run_single_sed(job):
+def run_single_model(job):
     """
-    Worker: evaluate grid for one SED epoch and return list of result rows.
-    Mirrors run_grid.py idea of "unit of work", but per-SED instead of per-model folder.
+    Run a single (tstar, tdust, tau, thick, phase) model in its own directory and 
+    write sed.dat with given parameters.
     """
-    ((sed, sed_source),
-    tdust_values, tau_values, thick_values,
-    tstar_dummy, template_path, template_tag,
-    y_mode, use_weights,
-    runner_kwargs, runner_sig) = job
-
-    if "sed" in sed and isinstance(sed["sed"], dict):
-        sed = sed["sed"]
-
-    phase = sed.get("phase_days", sed.get("phase", None))
-    mjd = sed.get("mjd", np.nan)
-    oid = sed.get("oid", "unknown")
-
-    if phase is None or (not np.isfinite(float(phase))):
-        return []
+    (tstarval, tdustval, tauval, thick_val, phase_days, oid,
+     template_path, template_tag,
+     runner_kwargs, runner_sig, ndigits) = job
     
+    # Get template and runner (cached per worker)
     template = _get_template(template_path)
     runner = _get_runner(runner_sig, runner_kwargs)
+    
+    # Canonical key for this model
+    leaf, key = make_leaf_and_key(
+        tstarval, tdustval, tauval, thick_val, phase_days, template_tag, ndigits
+    )
+    
+    # Run DUSTY model
+    lam_um, lamFlam, r1 = runner.evaluate_model(
+        tstar=float(tstarval),
+        tdust=float(tdustval),
+        tau=float(tauval),
+        shell_thickness=float(thick_val),
+        template=template,
+        phase_days=float(phase_days),
+        template_tag=str(template_tag),
+    )
 
-    rows = []
-    dof = max(len(sed.get("bands", [])) - 1, 1)
-
-    for thick, tdust, tau in it.product(thick_values, tdust_values, tau_values):
-        lam_um, lamFlam, r1 = runner.evaluate_model(
-            tstar=float(tstar_dummy),
-            tdust=float(tdust),
-            tau=float(tau),
-            shell_thickness=float(thick),
-            template=template,
-            phase_days=float(phase),
+    ckey = runner._canonical_key(
+        tstarval, tdustval, tauval, thick_val,
+        phase_days=phase_days,
+        template_tag=template_tag
+    )
+    npz_path = runner._disk_cache_path(ckey)
+    
+    if lam_um is None or lamFlam is None:
+        return dict(
+            oid=str(oid),
+            phase_days=float(phase_days),
             template_tag=str(template_tag),
+            tstar_dummy=float(tstarval),
+            tdust=float(tdustval),
+            tau=float(tauval),
+            shell_thickness=float(thick_val),
+            r1=np.nan,
+            npz_path=str(npz_path) if npz_path else None,
+            ierror=1,
+            error="DUSTY failed",
+            cached=False
         )
 
-        if lam_um is None or lamFlam is None:
-            continue
+    return dict(
+        oid=str(oid),
+        phase_days=float(phase_days),
+        template_tag=str(template_tag),
+        tstar_dummy=float(tstarval),
+        tdust=float(tdustval),
+        tau=float(tauval),
+        shell_thickness=float(thick_val),
+        r1=float(r1),
+        npz_path=str(npz_path) if npz_path else None,
+        ierror=0,
+        error=None,
+        cached=False
+    )
 
-        a, chi2 = _ls_scale_and_chi2(lam_um, lamFlam, sed, y_mode=y_mode, use_weights=use_weights)
-
-        if not np.isfinite(chi2):
-            continue
-
-        rows.append(dict(
-            oid=str(oid),
-            sed_source=str(sed_source),
-            mjd=float(mjd),
-            phase_days=float(phase),
-            template_tag=str(template_tag),
-            tstar_dummy=float(tstar_dummy),
-            tdust=float(tdust),
-            tau=float(tau),
-            shell_thickness=float(thick),
-            scale=float(a),
-            chi2=float(chi2),
-            chi2_red=float(chi2 / dof),
-            r1=float(r1),
-            ierror=0,
-            error=None,
-        ))
-
-    return rows
 
 def main():
     default_dusty_file_dir = config.dusty.dusty_file_dir
+    default_cache_dir = config.dusty.npz_cache_dir
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Generate DUSTY template grid models for SEDs"
+    )
 
-    # template controls
+    # Template controls
     parser.add_argument("--template_path", type=str, required=True,
                         help="Path to Nugent spectral series file (e.g. sn2p_flux.v1.2.dat).")
     parser.add_argument("--template_tag", type=str, default="nugent_iip",
@@ -182,21 +164,19 @@ def main():
     
     # SED input
     parser.add_argument("--seds_pkl", type=str, default=None,
-                    help="Pickle containing a single SED dict OR a list of SED dicts.")
+                        help="Pickle containing a single SED dict OR a list of SED dicts.")
     parser.add_argument("--sed_pickle_dir", type=str, default=None,
                         help="Directory containing *_tail_sed.pkl files (one SED dict per file).")
     parser.add_argument("--glob", type=str, default="*_tail_sed.pkl",
                         help="Glob used inside --sed_pickle_dir. Default '*_tail_sed.pkl'.")
 
-    # output
+    # Output
     parser.add_argument("workdir", type=str,
-                        help="Directory used for DUSTY work + caches + outputs.")
+                        help="Base directory for outputs (models saved under workdir/template_grids/{oid}/).")
     parser.add_argument("--out_csv", type=str, default=None,
-                        help="Where to write the combined CSV. Default under workdir.")
-    parser.add_argument("--write_per_epoch_csv", action="store_true",
-                        help="Also write one CSV per SED epoch under workdir.")
+                        help="Where to write the combined CSV. Default: workdir/template_grids/grid_summary.csv")
     
-    # dusty controls (mirror run_grid.py)
+    # DUSTY controls
     parser.add_argument("--tau_wav_micron", type=float, default=0.55,
                         help="Wavelength (micron) at which tau is specified.")
     parser.add_argument("--dtype", choices=["graphite", "silicate", "amorphous_carbon", "silicate_carbide"],
@@ -207,7 +187,7 @@ def main():
     parser.add_argument("--thick_list", type=str, default="2.0",
                         help="Comma-separated shell thickness values, e.g. '2.0'.")
     
-    # grid values
+    # Grid values
     parser.add_argument("--tdust_list", type=str, default=None,
                         help="Comma-separated Tdust values in K.")
     parser.add_argument("--tau_list", type=str, default=None,
@@ -215,22 +195,27 @@ def main():
     parser.add_argument("--tstar_dummy", type=float, default=6000.0,
                         help="Dummy T* passed through API (template mode ignores it physically).")
     
-    # scoring
-    parser.add_argument("--y_mode", choices=["Flam", "Fnu"], default="Flam")
-    parser.add_argument("--use_weights", action="store_true")
-
-    
-    # multiprocessing
+    # Multiprocessing
     parser.add_argument("--n_workers", type=int, default=4)
 
-    # caching / runner behavior
-    parser.add_argument("--cache_dir", type=str, default=None,
-                        help="Directory for .npz cache. Default under workdir.")
+    # Caching / runner behavior
+    parser.add_argument("--cache_dir", type=str, default=default_cache_dir,
+                        help="Directory for .npz cache.")
     parser.add_argument("--cache_ndigits", type=int, default=4)
     parser.add_argument("--cache_max", type=int, default=5000)
     parser.add_argument("--use_tmp", action="store_true")
+    parser.add_argument("--force_rerun", action="store_true",
+                        help="Ignore cache and rerun all models.")
+    
+    # Logging
+    parser.add_argument("--loglevel", type=str, default="INFO",
+                        help="Logging level.")
+    parser.add_argument("--logfile", type=str, default=None,
+                        help="Log file path.")
 
     args = parser.parse_args()
+
+    logger = getLogger(args.loglevel, args.logfile)
 
     # -----------------
     # Resolve workdir 
@@ -241,26 +226,26 @@ def main():
         project_root = script_dir.parent.parent.parent
         workdir_path = (project_root / args.workdir).resolve()
 
-    workdir = workdir_path.resolve()
-    workdir.mkdir(parents=True, exist_ok=True)
+    # Create template_grids directory
+    template_grids_dir = (workdir_path / "template_grids").resolve()
+    template_grids_dir.mkdir(parents=True, exist_ok=True)
 
-    # output CSV
+    # Output CSV
     if args.out_csv is None:
-        out_csv = workdir / f"template_grid_summary_{args.template_tag}.csv"
+        out_csv = template_grids_dir / f"grid_summary_{args.template_tag}.csv"
     else:
         out_csv = Path(args.out_csv).resolve()
 
-    # cache dir
-    cache_dir = Path(args.cache_dir).resolve() if args.cache_dir else (workdir / "dusty_npz_cache")
+    # Cache dir
+    cache_dir = Path(args.cache_dir).resolve() if args.cache_dir else Path(config.dusty.npz_cache_dir).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # check dusty binary exists
+    # Check dusty binary exists
     dusty_dir_abs = Path(args.dusty_file_dir).resolve()
     dusty_bin = dusty_dir_abs / "dusty"
     if not dusty_bin.exists():
         raise FileNotFoundError(f"Missing DUSTY binary at {dusty_bin}. Build it or fix --dusty_file_dir.")
 
-    
     # -----------------------------
     # Load SEDs
     # -----------------------------
@@ -282,22 +267,18 @@ def main():
                 raise RuntimeError(f"{p.name} did not contain a single SED dict.")
 
             if "sed" in obj and isinstance(obj["sed"], dict):
-                sed = obj["sed"].copy()
-
-                sed["oid"] = obj.get("oid", sed.get("oid", "unknown"))
-                sed["mjd"] = obj.get("mjd", sed.get("mjd", np.nan))
-
-                if "phase_days" not in sed or not np.isfinite(float(sed.get("phase_days", np.nan))):
-                    if "phase" in obj and np.isfinite(float(obj["phase"])):
-                        sed["phase_days"] = float(obj["phase"])
-
-                for k in ["t_exp_mjd", "t_exp_sig", "t_exp_band"]:
-                    if k in obj and k not in sed:
-                        sed[k] = obj[k]
-
-                sed_inputs.append((sed, str(p)))
+                sed = obj["sed"]
+                oid = obj.get("oid", sed.get("oid", "unknown"))
+                phase = sed.get("phase_days", obj.get("phase", None))
             else:
-                sed_inputs.append((obj, str(p)))
+                oid = obj.get("oid", "unknown")
+                phase = obj.get("phase_days", obj.get("phase", None))
+
+            if phase is None or not np.isfinite(float(phase)):
+                logger.warning(f"Skipping {p.name} - invalid phase")
+                continue
+
+            sed_inputs.append((oid, float(phase)))
 
     else:
         if args.seds_pkl is None:
@@ -308,21 +289,22 @@ def main():
             obj = pickle.load(f)
 
         if isinstance(obj, dict):
-            sed_inputs.append((obj, str(seds_p)))
+            oid = obj.get("oid", "unknown")
+            sed = obj.get("sed", obj)
+            phase = sed.get("phase_days", obj.get("phase", None))
+            if phase and np.isfinite(float(phase)):
+                sed_inputs.append((oid, float(phase)))
         elif isinstance(obj, (list, tuple)):
-            for i, sed in enumerate(obj):
-                if not isinstance(sed, dict):
-                    raise RuntimeError(f"Element {i} in {seds_p.name} is not a dict.")
-                sed_inputs.append((sed, f"{seds_p}#{i}"))
-        else:
-            raise RuntimeError("seds_pkl must contain a dict or a list of dicts.")
+            for i, sed_dict in enumerate(obj):
+                oid = sed_dict.get("oid", f"unknown_{i}")
+                phase = sed_dict.get("phase_days", sed_dict.get("phase", None))
+                if phase and np.isfinite(float(phase)):
+                    sed_inputs.append((oid, float(phase)))
 
     if not sed_inputs:
         raise RuntimeError("No SEDs loaded.")
 
-
-    # if not isinstance(seds, (list, tuple)) or len(seds) == 0:
-    #     raise RuntimeError("seds_pkl did not contain a non-empty list of SED dicts.")
+    logger.info(f"Loaded {len(sed_inputs)} SED(s)")
 
     # --------------
     # Build grids 
@@ -330,20 +312,22 @@ def main():
     if args.tdust_list:
         tdust_values = _parse_list(args.tdust_list)
     else:
-        tdust_values = [200, 400, 600, 800, 1000]
+        tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
 
     if args.tau_list:
         tau_values = _parse_list(args.tau_list)
     else:
-        tau_values = [1e-3, 1e-2, 1e-1, 0.3, 1.0, 3.0]
+        tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 1.0, 1.5, 2.0, 3.0, 4.0]
+    if args.thick_list:
+        thick_values = _parse_list(args.thick_list)
+    else:
+        thick_list=[2.0]
 
-    thick_values = _parse_list(args.thick_list)
-
-    # -----------------------------
-    # Runner kwargs (passed into workers)
-    # -----------------------------
+    # ----------------
+    # Runner kwargs
+    # ----------------
     runner_kwargs = dict(
-        base_workdir=str(workdir),
+        base_workdir=str(template_grids_dir),
         dusty_file_dir=str(dusty_dir_abs),
         dust_type=args.dtype,
         shell_thickness=float(thick_values[0]) if len(thick_values) == 1 else 2.0,  
@@ -367,51 +351,87 @@ def main():
         runner_kwargs["run_tag"],
     )
 
-    # --------------------
-    # Parallel execution
-    # --------------------
+    # -------------
+    # Check cache 
+    # -------------
+    completed = set()
+    
+    if not args.force_rerun and out_csv.exists():
+        prev = pd.read_csv(out_csv)
+        prev_ok = prev[(prev["ierror"] == 0) & prev["npz_path"].notna()]
+        for _, r in prev_ok.iterrows():
+            _, key = make_leaf_and_key(
+                r["tstar_dummy"], r["tdust"], r["tau"], r["shell_thickness"],
+                r["phase_days"], r["template_tag"], args.cache_ndigits
+            )
+            completed.add(key)
+        logger.info(f"Found {len(completed)} completed models to skip.")
+
+    # ----------------
+    # Build jobs list 
+    # ----------------
     jobs = []
-    for sed_pair in sed_inputs:
-        jobs.append(
-            (sed_pair,
-            tdust_values, tau_values, thick_values,
-            float(args.tstar_dummy), str(Path(args.template_path).resolve()), args.template_tag,
-            args.y_mode, bool(args.use_weights),
-            runner_kwargs, runner_sig)
-        )
+    skipped = 0
+    
+    for oid, phase in sed_inputs:
+        for thick, tdust, tau in it.product(thick_values, tdust_values, tau_values):
+            _, key = make_leaf_and_key(
+                args.tstar_dummy, tdust, tau, thick, phase, args.template_tag, args.cache_ndigits
+            )
+            
+            if key in completed:
+                skipped += 1
+                continue
+            
+            jobs.append((
+                float(args.tstar_dummy), float(tdust), float(tau), float(thick), float(phase), oid,
+                str(Path(args.template_path).resolve()), args.template_tag,
+                runner_kwargs, runner_sig, args.cache_ndigits
+            ))
 
+    logger.info(f"Skipping {skipped} cached models, running {len(jobs)} new ones.")
+
+    if len(jobs) == 0:
+        logger.info("No jobs to run (all cached). Exiting.")
+        return
+
+    # --------------------
+    # Parallel execution 
+    # --------------------
     max_workers = min(os.cpu_count() or 2, int(args.n_workers))
-    all_rows = []
-
+    
+    results_summary = []
+    
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(run_single_sed, job) for job in jobs]
+        futures = [ex.submit(run_single_model, job) for job in jobs]
         for fut in as_completed(futures):
-            rows = fut.result()
-            if rows:
-                all_rows.extend(rows)
+            res = fut.result()
+            results_summary.append(res)
+            status = "OK" if res.get("ierror", 1) == 0 else "ERROR"
+            logger.info(
+                f"{status}  OID={res['oid']} phase={res['phase_days']:.2f} "
+                f"Td={res['tdust']} tau={res['tau']} thick={res['shell_thickness']} "
+                f"-> npz={res.get('npz_path', 'N/A')}"
+            )
 
-                if args.write_per_epoch_csv:
-                    mjd0 = rows[0]["mjd"]
-                    oid = rows[0]["oid"]
-                    phase = rows[0]["phase_days"]
-                    df_epoch = pd.DataFrame(rows).sort_values("chi2_red")
-                    leaf = f"{oid}_mjd_{mjd0:.3f}_phase_{phase:.2f}".replace(".", "_")
-                    df_epoch.to_csv(workdir / f"grid_{leaf}.csv", index=False)
-
-    if not all_rows:
-        raise RuntimeError("No grid rows produced. Check phase_days and template coverage.")
-
-    df = pd.DataFrame(all_rows)
-    df = df.sort_values(["oid", "mjd", "chi2_red"])
-
-    df.to_csv(out_csv, index=False)
-
-    best = df.groupby(["oid"], as_index=False).first()
-    best_csv = out_csv.with_name(out_csv.stem + "_best_per_epoch.csv")
-    best.to_csv(best_csv, index=False)
-
-    print(f"[template-grid] wrote: {out_csv}")
-    print(f"[template-grid] wrote: {best_csv}")
+    # ------------------
+    # Write summary CSV 
+    # ------------------
+    if results_summary:
+        # Load existing results if not force_rerun
+        if not args.force_rerun and out_csv.exists():
+            existing = pd.read_csv(out_csv)
+            new_df = pd.DataFrame(results_summary)
+            df = pd.concat([existing, new_df], ignore_index=True)
+        else:
+            df = pd.DataFrame(results_summary)
+        
+        df = df.sort_values(["oid", "phase_days", "tdust", "tau", "shell_thickness"])
+        df.to_csv(out_csv, index=False)
+        
+        logger.info(f"Wrote model grid summary to {out_csv}")
+    else:
+        logger.warning("No results to write.")
 
 if __name__ == "__main__":
     main()

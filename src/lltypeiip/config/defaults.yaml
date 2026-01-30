@@ -48,7 +48,9 @@ dusty:
   dusty_file_dir: "/home/cal/analam/Documents/dusty/releaseV2"
   # Base directory for DUSTY model runs (within project)
   workdir: "dusty_runs"
-  workdir_mcmc_dir: "dusty_runs/mcmc_test_workdir"
+  workdir_mcmc_dir: "dusty_runs/mcmc_workdir"
+  # NPZ caches for all DUSTY models
+  npz_cache_dir: "dusty_runs/dusty_npz_cache"
 
 
 paths:

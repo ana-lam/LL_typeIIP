@@ -309,12 +309,30 @@ class DustyRunner:
         # save disk cache (optional)
         if dpath is not None:
             try:
-                tmp = dpath.with_suffix(dpath.suffix + f".tmp{os.getpid()}")
-                np.savez_compressed(tmp, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
-                os.replace(tmp, dpath)   # atomic rename on same filesystem
-            except Exception:
-                pass
+                with tempfile.NamedTemporaryFile(
+                    mode='wb', 
+                    delete=False, 
+                    dir=str(dpath.parent),  # ← Same directory as final file
+                    prefix='.tmp_',
+                    suffix='.npz'
+                ) as tmp_file:
+                    np.savez_compressed(tmp_file, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+                    tmp_path = tmp_file.name
 
+                os.replace(tmp_path, str(dpath))
+                
+                # tmp = dpath.with_suffix(dpath.suffix + f".tmp{os.getpid()}")
+                # np.savez_compressed(tmp, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+                # os.replace(tmp, dpath)   # atomic rename on same filesystem
+            except Exception as e:
+                if self.logger:
+                    self.logger.warning(f"Failed to write cache {dpath}: {e}")
+                try:
+                    if 'tmp_path' in locals():
+                        os.unlink(tmp_path)
+                except:
+                    pass
+                
         self._cache_set(ckey, out)
         
         return out

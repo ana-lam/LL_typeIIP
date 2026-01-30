@@ -20,6 +20,7 @@ from alerce.core import Alerce
 default_workdir = config.dusty.workdir_mcmc_dir
 default_outdir  = getattr(config.paths, "mcmc_results_dir", str(PROJECT_ROOT / "mcmc_results"))
 default_griddir = getattr(config.paths, "dusty_grid_dir", str(PROJECT_ROOT / "dusty_runs/silicate_tau_0.55um_fixed_thick_grid"))
+default_cache_dir = config.dusty.npz_cache_dir 
 
 def parse_args():
 
@@ -61,7 +62,7 @@ def parse_args():
     p.add_argument("--mp", choices=["spawn", "fork"], default="spawn")
 
     # cache
-    p.add_argument("--cache-dir", type=str, default="",
+    p.add_argument("--cache-dir", type=str, default=default_cache_dir,
                help="On-disk cache for DUSTY results (npz). Default: <workdir>/dusty_npz_cache")
     p.add_argument("--cache-ndigits", type=int, default=4,
                 help="Rounding digits used for tau/thickness cache keys.")
