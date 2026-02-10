@@ -200,7 +200,7 @@ def main():
     tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 
     # Thickness (R_out / R_in)
-    shell_thickness_values = [2.0]
+    shell_thickness_values = [2.0, 5.0]
 
     # Overrides from CLI if given
     def _parse_list(s):

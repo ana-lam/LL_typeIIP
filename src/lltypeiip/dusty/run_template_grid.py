@@ -321,7 +321,7 @@ def main():
     if args.thick_list:
         thick_values = _parse_list(args.thick_list)
     else:
-        thick_list=[2.0]
+        thick_values=[2.0]
 
     # ----------------
     # Runner kwargs

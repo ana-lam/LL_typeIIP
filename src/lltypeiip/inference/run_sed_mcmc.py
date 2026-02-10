@@ -70,6 +70,9 @@ def parse_args():
                 help="Max number of models kept in memory cache per process.")
     p.add_argument("--no-tmp", action="store_true", help="Disable temp dirs for DUSTY runs")
 
+    # shell thickness
+    p.add_argument("--shell-thickness", type=float, default=2.0,
+                   help="Shell thickness (Y_out/Y_in). Default: 2.0")
 
     return p.parse_args()
 
@@ -159,7 +162,7 @@ def main():
 
         df_oid = df_oid.sort_values("chi2_red")
         df = df_oid  # pass into run_mcmc_for_sed, it uses df.iloc[0] as best
-        shell_thickness = float(df.iloc[0].get("shell_thickness", 2.0))
+        shell_thickness = args.shell_thickness
         dust_type = str(df.iloc[0].get("dust_type", "silicate")) if "dust_type" in df.columns else "silicate"
     else:
         df = fit_grid_to_sed(
@@ -168,7 +171,7 @@ def main():
             y_mode="Flam",
             use_weights=True
         )
-        shell_thickness = 2.0
+        shell_thickness = args.shell_thickness
         dust_type = "silicate"
 
 
@@ -230,7 +233,8 @@ def main():
         )
 
         suffix = "" if args.seed == 42 else f"_seed{args.seed}"
-        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_{mode}{suffix}.npz"
+        thick_str = str(shell_thickness).replace('.', '_')
+        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_thick{thick_str}_{mode}{suffix}.npz"
         outpath = outdir / outname
 
         np.savez(
