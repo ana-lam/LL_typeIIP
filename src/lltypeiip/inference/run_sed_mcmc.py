@@ -180,6 +180,7 @@ def main():
             use_weights=True,
         )
 
+        df.to_csv(Path(args.template_grid_csv).resolve())
 
         df_all = pd.read_csv(Path(args.template_grid_csv).resolve())
         df_filtered = df_all[

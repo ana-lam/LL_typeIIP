@@ -205,9 +205,7 @@ def fit_template_grid_to_sed(template_grid_csv, sed, runner, template,
     """
     Convert a template-based grid CSV into DUSTY models, fit to SED.
     """
-
     df_all = pd.read_csv(template_grid_csv)
-
     oid = sed.get('oid', None)
     if oid is None:
         raise ValueError("SED dictionary must contain 'oid' key")
@@ -224,28 +222,32 @@ def fit_template_grid_to_sed(template_grid_csv, sed, runner, template,
         df = df[df["template_tag"].astype(str) == str(template_tag)].copy()
         if df.empty:
             raise RuntimeError(f"No rows for oid={oid} with template_tag={template_tag}")
-
+    
     # could add logic later in case multiple SEDs per SN
-
     sort_cols = [c for c in ["chi2_red", "chi2"] if c in df.columns]
     if sort_cols:
         df = df.sort_values(sort_cols).reset_index(drop=True)
-
+    
     if top_k_build is not None:
         df_build = df.head(int(top_k_build)).copy()
     else:
-        df_build = df
-
+        df_build = df.copy()
+    
     model_map = {}
-    rows_out = []
-
+    
+    # Initialize new columns in df_build
+    df_build['folder'] = None
+    df_build['scale'] = np.nan
+    df_build['chi2'] = np.nan
+    df_build['dof'] = np.nan
+    df_build['chi2_red'] = np.nan
+    
     for idx, r in df_build.iterrows():
         tdust = float(r["tdust"])
         tau = float(r["tau"])
         thick = float(r["shell_thickness"]) if "shell_thickness" in r else float(r.get("thick", 2.0))
-
         tstar = float(r["tstar_dummy"]) if "tstar_dummy" in r else float(r.get("tstar", 6000.0))
-
+        
         lam_um, lamFlam, r1 = runner.evaluate_model(
             tstar=tstar,
             tdust=tdust,
@@ -255,11 +257,11 @@ def fit_template_grid_to_sed(template_grid_csv, sed, runner, template,
             phase_days=float(phase),
             template_tag=str(template_tag),
         )
-
+        
         folder = f"{folder_prefix}_{oid}_row{idx}"
-
+        
         m = DustyModel(
-            folder=folder,  # not a real dir
+            folder=folder,
             Tstar=tstar,
             Tdust=tdust,
             tau=tau,
@@ -267,26 +269,23 @@ def fit_template_grid_to_sed(template_grid_csv, sed, runner, template,
             lam_um=lam_um,
             lamFlam=lamFlam,
         )
-
+        
         fit_scale_to_sed(m, sed, y_mode=y_mode, use_weights=use_weights)
-
+        
         model_map[folder] = m
-
-        rows_out.append(dict(
-            folder=folder,
-            oid=str(oid),
-            tstar=m.Tstar,
-            tdust=m.Tdust,
-            tau=m.tau,
-            scale=m.scale,
-            chi2=m.chi2,
-            dof=m.dof,
-            chi2_red=m.chi2_red,
-        ))
-
-    if not rows_out:
+        
+        # Update the dataframe with fit results
+        df_build.loc[idx, 'folder'] = folder
+        df_build.loc[idx, 'scale'] = m.scale
+        df_build.loc[idx, 'chi2'] = m.chi2
+        df_build.loc[idx, 'dof'] = m.dof
+        df_build.loc[idx, 'chi2_red'] = m.chi2_red
+    
+    if df_build.empty:
         raise RuntimeError(f"Could not build any DustyModel objects for oid={oid}")
-
-    df_out = pd.DataFrame(rows_out).sort_values("chi2_red").reset_index(drop=True)
+    
+    # Sort by chi2_red
+    df_out = df_build.sort_values("chi2_red").reset_index(drop=True)
     df_out._models = model_map
-    return df_out 
+    
+    return df_out
