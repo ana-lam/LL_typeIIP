@@ -8,12 +8,14 @@ from pathlib import Path
 import pickle
 import pandas as pd
 
+from lltypeiip.dusty.scaling import fit_template_grid_to_sed
+
 
 from ..sed import build_multi_epoch_seds_from_tail
 from .mcmc import run_mcmc_for_sed
 from ..config import config, PROJECT_ROOT
 from ..photometry import get_wise_lc_data, get_ztf_lc_data, convert_ZTF_mag_mJy
-from ..dusty import fit_grid_to_sed
+from ..dusty import fit_grid_to_sed, NugentIIPSeries, DustyRunner
 
 from alerce.core import Alerce
 
@@ -155,13 +157,40 @@ def main():
         if args.template_grid_csv is None:
             raise RuntimeError("Template mode requires --template-grid-csv from run_template_grid.py")
 
+        template = NugentIIPSeries(str(Path(args.template_path).resolve()))
+
+        runner = DustyRunner(
+            base_workdir=workdir,
+            dusty_file_dir=dusty_file_dir,
+            dust_type="silicate", 
+            shell_thickness=args.shell_thickness,
+            cache_dir=args.cache_dir,
+            cache_ndigits=args.cache_ndigits,
+            cache_max=args.cache_max,
+            use_tmp=not args.no_tmp,
+        )
+
+        df = fit_template_grid_to_sed(
+            template_grid_csv=args.template_grid_csv,
+            sed=sed,
+            runner=runner,
+            template=template,
+            template_tag=args.template_tag,
+            y_mode="Flam",
+            use_weights=True,
+        )
+
+
         df_all = pd.read_csv(Path(args.template_grid_csv).resolve())
-        df_oid = df_all[df_all["oid"].astype(str) == str(oid)].copy()
-        if df_oid.empty:
+        df_filtered = df_all[
+            (df_all["oid"].astype(str) == str(oid)) &
+            (df_all["shell_thickness"] == args.shell_thickness)
+        ].copy()
+        if df_filtered.empty:
             raise RuntimeError(f"No rows for oid={oid} found in {args.template_grid_csv}")
 
-        df_oid = df_oid.sort_values("chi2_red")
-        df = df_oid  # pass into run_mcmc_for_sed, it uses df.iloc[0] as best
+        df_filtered = df_filtered.sort_values("chi2_red")
+        df = df_filtered  # pass into run_mcmc_for_sed, it uses df.iloc[0] as best
         shell_thickness = args.shell_thickness
         dust_type = str(df.iloc[0].get("dust_type", "silicate")) if "dust_type" in df.columns else "silicate"
     else:
