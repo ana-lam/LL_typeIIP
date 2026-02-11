@@ -781,7 +781,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         # Top panel: ZTF LC
         # -----------------
         if ztf_flux:
-            # print("Converting ZTF mag to mJy...")
             ztf_resdict = convert_ZTF_mag_mJy(ztf_resdict, forced=True)
 
             # clip fluxes for log scale
@@ -860,40 +859,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         fig.subplots_adjust(hspace=0.0)
         fig.suptitle(f"ZTF + WISE Light Curve: {oid}", fontsize=16, y=0.93)
 
-        # if mark_tail_start:
-        #     params_path = Path(config.paths.params)
-        #     params = pd.read_csv(params_path)
-        #     m = params[['name', 'plateauend', 'tailstart']].dropna()
-        #     m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
-        #     if oid in m_dict:
-        #         tail_start = m_dict[oid]
-        #         ax1.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
-        #         ax1.text(
-        #             tail_start-2,          # x position (data coords)
-        #             0.95,                 # y as a fraction of the axes height
-        #             "Tail Start",        # text
-        #             rotation=90,          # vertical text
-        #             va="top",             # align text relative to its position
-        #             ha="center",
-        #             fontsize=9,
-        #             color="black",
-        #             transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
-        #             clip_on=False,
-        #         )
-        #         ax2.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
-        #         ax2.text(
-        #             tail_start-2,          # x position (data coords)
-        #             0.95,                 # y as a fraction of the axes height
-        #             "Tail Start",        # text
-        #             rotation=90,          # vertical text
-        #             va="top",             # align text relative to its position
-        #             ha="center",
-        #             fontsize=9,
-        #             color="black",
-        #             transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
-        #             clip_on=False,
-        #         )
-
         if mark_tail_start and oid in m_dict:
             tail_start = m_dict[oid]
             for ax in (ax1, ax2):
@@ -904,40 +869,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                     text_kw=dict(fontsize=9, color="black"),
                 )
 
-        
-        # if mark_plateau_end:
-        #     params_path = Path(config.paths.params)
-        #     params = pd.read_csv(params_path)
-        #     m = params[['name', 'plateauend', 'tailstart']].dropna()
-        #     m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
-        #     if oid in m_dict:
-        #         plateau_end = m_dict[oid]
-        #         ax1.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
-        #         ax2.axvline(plateau_end, color='black', linestyle='--', alpha=0.7)
-        #         ax1.text(
-        #             plateau_end-2,          # x position (data coords)
-        #             0.05,                 # y as a fraction of the axes height
-        #             f"Plateau End ({plateau_end:.1f})",        # text
-        #             rotation=90,          # vertical text
-        #             va="bottom",             # align text relative to its position
-        #             ha="center",
-        #             fontsize=9,
-        #             color="black",
-        #             transform=ax1.get_xaxis_transform(),  # x in data, y in axes coords
-        #             clip_on=False,
-        #         )
-        #         ax2.text(
-        #             plateau_end-2,          # x position (data coords)
-        #             0.05,                 # y as a fraction of the axes height
-        #             f"Plateau End ({plateau_end:.1f})",        # text
-        #             rotation=90,          # vertical text
-        #             va="bottom",             # align text relative to its position
-        #             ha="center",
-        #             fontsize=9,
-        #             color="black",
-        #             transform=ax2.get_xaxis_transform(),  # x in data, y in axes coords
-        #             clip_on=False,
-        #         )
         if mark_plateau_end and oid in m_dict:
             plateau_end = m_dict[oid]
             for ax in (ax1, ax2):
@@ -1082,18 +1013,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 else:
                     ax.axvline(tail_start, color='black', linestyle='--', alpha=0.7)
                 if labels:
-                    # ax.text(
-                    #     tail_start-4,          # x position (data coords)
-                    #     0.02,                 # y as a fraction of the axes height
-                    #     f"Tail Start",        # text
-                    #     rotation=90,          # vertical text
-                    #     va="bottom",             # align text relative to its position
-                    #     ha="center",
-                    #     fontsize=9,
-                    #     color="black",
-                    #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
-                    #     clip_on=False,
-                    # )
                     plateau_end = m_dict[oid]
                     vline_with_label(
                         ax, tail_start, "Tail Start",
@@ -1114,18 +1033,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                 else:
                     ax.axvline(plateau_end, color='black', linestyle='-.', alpha=0.7)
                 if labels:
-                    # ax.text(
-                    #     plateau_end-4,          # x position (data coords)
-                    #     0.02,                 # y as a fraction of the axes height
-                    #     f"Plateau End",        # text
-                    #     rotation=90,          # vertical text
-                    #     va="bottom",             # align text relative to its position
-                    #     ha="center",
-                    #     fontsize=9,
-                    #     color="black",
-                    #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
-                    #     clip_on=False,
-                    # )
                     vline_with_label(
                         ax, plateau_end, "Plateau End",
                         y=0.02, dx_pts=-5,
@@ -1134,20 +1041,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
                     )
 
         if mark_custom_mjd is not None:
-            # ax.axvline(mark_custom_mjd, color='red', alpha=0.7, linewidth=3.5)
-            # ax.text(
-            #     mark_custom_mjd-3.5,          # x position (data coords)
-            #     0.2,                 # y as a fraction of the axes height
-            #     f"SED MJD ({mark_custom_mjd:.0f})",        # text
-            #     rotation=90,          # vertical text
-            #     va="bottom",             # align text relative to its position
-            #     ha="center",
-            #     fontsize=10,
-            #     color="black",
-            #     transform=ax.get_xaxis_transform(),  # x in data, y in axes coords
-            #     clip_on=False,
-            #     fontweight='bold'
-            # )
             if labels:
                 vline_with_label(
                             ax, mark_custom_mjd, f"SED MJD ({mark_custom_mjd:.0f})",
