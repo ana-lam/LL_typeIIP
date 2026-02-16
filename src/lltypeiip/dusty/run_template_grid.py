@@ -1,3 +1,9 @@
+# run as such from home directory
+# python -m lltypeiip.dusty.run_template_grid \
+# --thick_list "2.0" --n_workers 4 \
+# --template_path "data/typeiip_spectral_templates/sn2p_flux.v1.2.dat" \
+# --sed_pickle_dir "data/tail_seds" "dusty_runs/template_grids"
+
 import os
 # keep single-threaded for numerical libraries to avoid oversubscription
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -179,13 +185,11 @@ def main():
     # DUSTY controls
     parser.add_argument("--tau_wav_micron", type=float, default=0.55,
                         help="Wavelength (micron) at which tau is specified.")
-    parser.add_argument("--dtype", choices=["graphite", "silicate", "amorphous_carbon", "silicate_carbide"],
+    parser.add_argument("--dust_type", choices=["graphite", "silicate", "amorphous_carbon", "silicate_carbide"],
                         default="silicate",
                         help="Dust type to use.")
     parser.add_argument("--dusty_file_dir", type=str, default=default_dusty_file_dir,
                         help="Directory with DUSTY code files.")
-    parser.add_argument("--thick_list", type=str, default="2.0",
-                        help="Comma-separated shell thickness values, e.g. '2.0'.")
     
     # Grid values
     parser.add_argument("--tdust_list", type=str, default=None,
@@ -194,6 +198,8 @@ def main():
                         help="Comma-separated tau values.")
     parser.add_argument("--tstar_dummy", type=float, default=6000.0,
                         help="Dummy T* passed through API (template mode ignores it physically).")
+    parser.add_argument("--thick_list", type=str, default="2.0",
+                        help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'.")
     
     # Multiprocessing
     parser.add_argument("--n_workers", type=int, default=4)
@@ -216,35 +222,6 @@ def main():
     args = parser.parse_args()
 
     logger = getLogger(args.loglevel, args.logfile)
-
-    # -----------------
-    # Resolve workdir 
-    # -----------------
-    workdir_path = Path(args.workdir)
-    if not workdir_path.is_absolute():
-        script_dir = Path(__file__).parent.resolve()
-        project_root = script_dir.parent.parent.parent
-        workdir_path = (project_root / args.workdir).resolve()
-
-    # Create template_grids directory
-    template_grids_dir = (workdir_path / "template_grids").resolve()
-    template_grids_dir.mkdir(parents=True, exist_ok=True)
-
-    # Output CSV
-    if args.out_csv is None:
-        out_csv = template_grids_dir / f"grid_summary_{args.template_tag}.csv"
-    else:
-        out_csv = Path(args.out_csv).resolve()
-
-    # Cache dir
-    cache_dir = Path(args.cache_dir).resolve() if args.cache_dir else Path(config.dusty.npz_cache_dir).resolve()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check dusty binary exists
-    dusty_dir_abs = Path(args.dusty_file_dir).resolve()
-    dusty_bin = dusty_dir_abs / "dusty"
-    if not dusty_bin.exists():
-        raise FileNotFoundError(f"Missing DUSTY binary at {dusty_bin}. Build it or fix --dusty_file_dir.")
 
     # -----------------------------
     # Load SEDs
@@ -323,13 +300,44 @@ def main():
     else:
         thick_values=[2.0]
 
+    # -----------------
+    # Resolve workdir 
+    # -----------------
+    workdir_path = Path(args.workdir)
+    if not workdir_path.is_absolute():
+        script_dir = Path(__file__).parent.resolve()
+        project_root = script_dir.parent.parent.parent
+        workdir_path = (project_root / args.workdir).resolve()
+
+    dust_label = f'{args.dust_type}_tau_{args.tau_wav_micron}um'
+
+    # Create template_grids directory
+    workdir = (workdir_path / f'{dust_label}_thick_{str(thick_values[0]).replace(".", "_")}').resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # Output CSV
+    if args.out_csv is None:
+        out_csv = workdir / f"grid_summary_nugent_iip_thick_{str(thick_values[0]).replace(".", "_")}.csv"
+    else:
+        out_csv = Path(args.out_csv).resolve()
+
+    # Cache dir
+    cache_dir = Path(args.cache_dir).resolve() if args.cache_dir else Path(config.dusty.npz_cache_dir).resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check dusty binary exists
+    dusty_dir_abs = Path(args.dusty_file_dir).resolve()
+    dusty_bin = dusty_dir_abs / "dusty"
+    if not dusty_bin.exists():
+        raise FileNotFoundError(f"Missing DUSTY binary at {dusty_bin}. Build it or fix --dusty_file_dir.")
+
     # ----------------
     # Runner kwargs
     # ----------------
     runner_kwargs = dict(
-        base_workdir=str(template_grids_dir),
+        base_workdir=str(workdir),
         dusty_file_dir=str(dusty_dir_abs),
-        dust_type=args.dtype,
+        dust_type=args.dust_type,
         shell_thickness=float(thick_values[0]) if len(thick_values) == 1 else 2.0,  
         tau_wavelength_microns=float(args.tau_wav_micron),
         cache_dir=str(cache_dir),

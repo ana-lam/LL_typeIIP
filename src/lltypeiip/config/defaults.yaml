@@ -60,7 +60,6 @@ paths:
   alerce_dir: "data/ztf_alerce"
   wise_dir: "data/snii_lcs_WISE"
   dustmaps_dir: "data/dustmaps"
-  dusty_grid_dir: "dusty_runs/silicate_tau_0.55um_fixed_thick_grid"
   mcmc_results_dir: "mcmc_results"
   
   # specific files

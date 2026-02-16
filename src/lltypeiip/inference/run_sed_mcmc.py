@@ -8,9 +8,6 @@ from pathlib import Path
 import pickle
 import pandas as pd
 
-from lltypeiip.dusty.scaling import fit_template_grid_to_sed
-
-
 from ..sed import build_multi_epoch_seds_from_tail
 from .mcmc import run_mcmc_for_sed
 from ..config import config, PROJECT_ROOT
@@ -21,7 +18,6 @@ from alerce.core import Alerce
 
 default_workdir = config.dusty.workdir_mcmc_dir
 default_outdir  = getattr(config.paths, "mcmc_results_dir", str(PROJECT_ROOT / "mcmc_results"))
-default_griddir = getattr(config.paths, "dusty_grid_dir", str(PROJECT_ROOT / "dusty_runs/silicate_tau_0.55um_fixed_thick_grid"))
 default_cache_dir = config.dusty.npz_cache_dir 
 
 def parse_args():
@@ -35,8 +31,8 @@ def parse_args():
     p.add_argument("--template-path", type=str, default=None,
                    help="If set: use Spectrum=5 template mode.")
     p.add_argument("--template-tag", type=str, default="nugent_iip")
-    p.add_argument("--template-grid-csv", type=str, default=None,
-                   help="CSV from run_template_grid.py (full rows), used to pick best row for initialization.")
+    p.add_argument("--grid-csv", type=str, default=None,
+                   help="CSV from running grids, used to pick best row for initialization.")
     p.add_argument("--tstar-dummy", type=float, default=6000.0)
 
     # optionally load one saved sed pickle instead of rebuilding
@@ -59,7 +55,6 @@ def parse_args():
                    help="Gaussian weight for mixture prior")
 
     p.add_argument("--workdir", type=str, default=default_workdir)
-    p.add_argument("--grid-dir", type=str, default=default_griddir)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--mp", choices=["spawn", "fork"], default="spawn")
 
@@ -79,6 +74,7 @@ def parse_args():
     return p.parse_args()
 
 def _unwrap_sed(obj):
+    """Unwrap SED from pickle payload if needed."""
     if isinstance(obj, dict) and "sed" in obj and isinstance(obj["sed"], dict):
         sed = obj["sed"]
         if "phase_days" not in sed and "phase" in obj:
@@ -96,16 +92,15 @@ def main():
 
     print(f"Running MCMC for OID: {oid}")
     print(f"Posterior mode: {args.mode}")
+    print(f"Shell thickness: {args.shell_thickness}")
 
     dusty_file_dir = config.dusty.dusty_file_dir
     workdir = args.workdir
-    grid_dir = args.grid_dir
 
     os.makedirs(workdir, exist_ok=True)
 
     print(f"DUSTY binary dir: {dusty_file_dir}")
     print(f"Working directory: {workdir}")
-    print(f"Grid directory: {grid_dir}")
 
     # photometry stuff
     if args.sed_pkl:
@@ -153,65 +148,37 @@ def main():
     # grid fitting
     print("Running grid fit...")
 
-    if template_mode:
-        if args.template_grid_csv is None:
-            raise RuntimeError("Template mode requires --template-grid-csv from run_template_grid.py")
+    if args.grid_csv is None:
+        raise RuntimeError("Requires --grid-csv from running grids")
+    
+    grid_csv = Path(args.grid_csv).resolve()
 
-        template = NugentIIPSeries(str(Path(args.template_path).resolve()))
+    if not grid_csv.exists():
+        raise RuntimeError(f"Grid CSV not found: {grid_csv}")
+    
+    print(f"Loading grid from: {grid_csv}")
+    
+    df = fit_grid_to_sed(
+        grid_csv=str(grid_csv),
+        sed=sed,
+        shell_thickness=args.shell_thickness,
+        template_tag=args.template_tag if template_mode else None,
+        y_mode="Flam",
+        use_weights=True,
+        top_k=None  # load all models
+    )
 
-        runner = DustyRunner(
-            base_workdir=workdir,
-            dusty_file_dir=dusty_file_dir,
-            dust_type="silicate", 
-            shell_thickness=args.shell_thickness,
-            cache_dir=args.cache_dir,
-            cache_ndigits=args.cache_ndigits,
-            cache_max=args.cache_max,
-            use_tmp=not args.no_tmp,
-        )
+    tstar = df.iloc[0]['tstar'] if 'tstar' in df.columns else df.iloc[0]['tstar_dummy'] if 'tstar_dummy' in df.columns else None
+    print(f"Loaded {len(df)} grid models")
+    print(f"Best fit: tstar={tstar}K, tdust={df.iloc[0]['tdust']:.1f}K, tau={df.iloc[0]['tau']:.4f}, χ²_red={df.iloc[0]['chi2_red']:.2f}")
 
-        df = fit_template_grid_to_sed(
-            template_grid_csv=args.template_grid_csv,
-            sed=sed,
-            runner=runner,
-            template=template,
-            template_tag=args.template_tag,
-            y_mode="Flam",
-            use_weights=True,
-        )
+    shell_thickness = args.shell_thickness
+    dust_type = "silicate"
 
-        df.to_csv(Path(args.template_grid_csv).resolve())
-
-        df_all = pd.read_csv(Path(args.template_grid_csv).resolve())
-        df_filtered = df_all[
-            (df_all["oid"].astype(str) == str(oid)) &
-            (df_all["shell_thickness"] == args.shell_thickness)
-        ].copy()
-        if df_filtered.empty:
-            raise RuntimeError(f"No rows for oid={oid} found in {args.template_grid_csv}")
-
-        df_filtered = df_filtered.sort_values("chi2_red")
-        df = df_filtered  # pass into run_mcmc_for_sed, it uses df.iloc[0] as best
-        shell_thickness = args.shell_thickness
-        dust_type = str(df.iloc[0].get("dust_type", "silicate")) if "dust_type" in df.columns else "silicate"
-    else:
-        df = fit_grid_to_sed(
-            grid_dir,
-            sed,
-            y_mode="Flam",
-            use_weights=True
-        )
-        shell_thickness = args.shell_thickness
-        dust_type = "silicate"
-
-
-    # MCMC 
-    print("Starting MCMC...")
+    print("\nStarting MCMC...")
     print(f"mp_prefer={args.mp}  ncores={args.ncores}  nwalkers={args.nwalkers}", flush=True)
 
     modes = [args.mode] if not args.sweep else ["data", "anchored", "mixture"]
-
-
     mode_kwargs = {
         "data": dict(
             posterior_mode="data",
@@ -236,7 +203,8 @@ def main():
 
     for mode in modes:
         print(f"\n=== Running mode: {mode} ===", flush=True)
-        run_tag = f"{oid}_{('tmpl' if template_mode else 'bb')}_{mode}_seed{args.seed}"
+        run_tag = f"{oid}_{('tmpl' if template_mode else 'bb')}_thick{str(shell_thickness).replace('.', '_')}_{mode}_seed{args.seed}"
+
         results = run_mcmc_for_sed(
             sed=sed,
             grid_df=df,
@@ -245,7 +213,7 @@ def main():
             dust_type=dust_type,
             shell_thickness=shell_thickness,
             template_path=(args.template_path if template_mode else None),
-            template_tag=args.template_tag,
+            template_tag=args.template_tag if template_mode else None,
             tstar_dummy=float(args.tstar_dummy),
             nwalkers=args.nwalkers,
             nsteps=args.nsteps,
@@ -285,9 +253,11 @@ def main():
             mode=mode,
             template_mode=results.get("template_mode", False),
             template_tag=results.get("template_tag", ""),
+            shell_thickness=shell_thickness,
         )
-
+        
         print(f"Saved results to: {outpath}")
+    
     print("Done.")
 
 if __name__ == "__main__":

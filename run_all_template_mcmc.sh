@@ -13,6 +13,7 @@ echo "OIDs file      : $OIDS_FILE"
 echo "Parallel jobs  : $NJOBS"
 echo "Cores per job  : $NCORES"
 echo "Logs in        : $LOGDIR"
+echo "Thickness values: 2.0 and 5.0"
 echo
 
 parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \

@@ -1,3 +1,7 @@
+# run as such from home directory
+# python -m lltypeiip.dusty.run_grid \
+# --thick_list "2.0" \
+# --n_workers 4 "dusty_runs/blackbody_grids"
 import os
 # keep single-threaded for numerical libraries to avoid oversubscription
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -121,7 +125,7 @@ def main():
     
     # Use config from lltypeiip.config
     default_dusty_file_dir = config.dusty.dusty_file_dir
-    default_workdir = config.dusty.workdir
+    default_workdir = config.dusty.workdir + "/blackbody_grids" # will actually define in command run
     default_cache_dir = config.dusty.npz_cache_dir
     
     parser = argparse.ArgumentParser(
@@ -130,9 +134,6 @@ def main():
 
     parser.add_argument("--tau_wav_micron", type=float, default=0.55,
                         help="Wavelength (in microns) at which tau is specified (use 0.55 micron for v band).")
-    
-    parser.add_argument("--thick", type=float, default=2.0,
-                        help="Shell thickness (R_out / R_in).")
     
     parser.add_argument("--dust_type", choices=['graphite', 'silicate',
                                             'amorphous_carbon', 'silicate_carbide'],
@@ -158,11 +159,12 @@ def main():
                         help="Comma-separated Tdust values in K, e.g. '900,1000'")
     parser.add_argument("--tau_list", type=str, default=None,
                         help="Comma-separated tauV values, e.g. '0.03,0.1,0.3'")
-    parser.add_argument("--thick_list", type=str, default=None,
-                        help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'")
+    parser.add_argument("--thick_list", type=str, default="2.0",
+                        help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'.")
+
 
     parser.add_argument("--write_sed_dat", action="store_true",
-                        help="Write sed.dat files (for backward compatibility with old code).")
+                        help="Write sed.dat files.")
 
     # caching args
     parser.add_argument("--cache_dir", type=str, default=default_cache_dir,
@@ -200,7 +202,7 @@ def main():
     tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 
     # Thickness (R_out / R_in)
-    shell_thickness_values = [2.0, 5.0]
+    shell_thickness_values = [2.0]
 
     # Overrides from CLI if given
     def _parse_list(s):
@@ -247,7 +249,7 @@ def main():
         project_root = script_dir.parent.parent.parent  # LL_typeIIP/
         workdir_path = (project_root / args.workdir).resolve()
     
-    workdir = (workdir_path / f'{dust_label}_fixed_thick_grid').resolve()
+    workdir = (workdir_path / f'{dust_label}_thick_{str(shell_thickness_values[0]).replace(".", "_")}').resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
     dusty_dir_abs = Path(args.dusty_file_dir).resolve()
@@ -257,7 +259,7 @@ def main():
     # os.environ["PATH"] = f"{str(dusty_dir_abs)}:{os.environ.get('PATH','')}"
 
     if args.out_csv is None:
-        out_csv = workdir / "model_grid_summary.csv"
+        out_csv = workdir / f"grid_summary_blackbody_thick_{str(shell_thickness_values[0]).replace('.', '_')}.csv"
     else:
         out_csv = Path(args.out_csv).resolve()
 
