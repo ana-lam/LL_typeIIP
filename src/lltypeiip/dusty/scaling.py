@@ -159,7 +159,7 @@ def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
         raise ValueError("y_mode must be 'Flam' or 'Fnu'")
 
 def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weights=True,
-                    template_tag=None, top_k=None):
+                    template_tag=None, top_k=None, max_tstar=6000.0):
     """
     Fitting function for both blackbody and template grids.
 
@@ -217,6 +217,13 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
 
     if shell_thickness is not None:
         models = [m for m in models if np.isclose(m.shell_thickness, shell_thickness, atol=0.01)]
+    
+    if not is_template and max_tstar is not None:
+        n_before = len(models)
+        models = [m for m in models if m.Tstar <= max_tstar]
+        n_after = len(models)
+        if n_before > n_after:
+            print(f"Filtered out {n_before - n_after} models with Tstar > {max_tstar} K")
 
     if not models:
         raise RuntimeError(
@@ -244,6 +251,11 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
             dof=m.dof,
             chi2_red=m.chi2_red
         )
+
+        if m.npz_path is not None:
+            row['npz_path'] = m.npz_path
+        if m.outpath is not None:
+            row['outpath'] = m.outpath
         
         if not is_template:
             row['tstar'] = m.Tstar

@@ -178,7 +178,7 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
                            log10_tau=0.8, 
                            log10_a=0.8)
 
-    tstar_bounds = prior_config.get("tstar_bounds", (2000.0, 12000.0))
+    tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 12000.0))
     tdust_bounds = prior_config.get("tdust_bounds", (100.0, 1500.0))
     log10_tau_bounds = prior_config.get("log10_tau_bounds", (-4.0, 2.0))
     log10_a_bounds = prior_config.get("log10_a_bounds", (-30.0, 30.0))

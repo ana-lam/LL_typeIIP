@@ -191,8 +191,8 @@ def main():
     # -----------------------------
 
     # Stellar temperature (K): cool photosphere range appropriate for your source
-    tstar_values = [4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000,
-                    10500, 11000, 11500, 12000, 12500, 13000, 13500, 14000, 14500, 15000]
+    tstar_values = [1000, 1500, 2000, 2500, 3000, 3500,4000, 4500, 5000, 5500, 6000, 6500,
+                    7000, 7500, 8000, 8500, 9000, 9500, 10000]
 
     # Inner dust temperature (K): warm silicate near sublimation
     tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]

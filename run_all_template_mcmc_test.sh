@@ -3,7 +3,7 @@ set -euo pipefail
 
 OIDS_FILE="sed_sample.txt"
 LOGDIR="mcmc_logs_template"
-NJOBS=4
+NJOBS=2
 NCORES=4
 
 mkdir -p "$LOGDIR"

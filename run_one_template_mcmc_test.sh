@@ -32,7 +32,7 @@ mkdir -p "$logdir" "$cachedir"
 # Loop over both thickness values
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
-  TEMPLATE_GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_fixed_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
+  TEMPLATE_GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
 
   # sanity check for this thickness's grid
   [ -f "$TEMPLATE_GRID_CSV" ] || { echo "!!! Missing template grid CSV: $TEMPLATE_GRID_CSV"; exit 4; }
@@ -48,7 +48,7 @@ for thick in "${THICK_VALUES[@]}"; do
     echo "workdir=$workdir"
     echo "cachedir=$cachedir"
     echo "sed_pkl=$sed_pkl"
-    echo "template_grid_csv=$TEMPLATE_GRID_CSV"
+    echo "grid-csv=$TEMPLATE_GRID_CSV"
     echo "shell_thickness=$thick"
     echo
 
@@ -56,7 +56,7 @@ for thick in "${THICK_VALUES[@]}"; do
       --sed-pkl "$sed_pkl" \
       --template-path "$TEMPLATE_PATH" \
       --template-tag "$TEMPLATE_TAG" \
-      --template-grid-csv "$TEMPLATE_GRID_CSV" \
+      --grid-csv "$TEMPLATE_GRID_CSV" \
       --tstar-dummy 6000 \
       --shell-thickness "$thick" \
       --mode mixture \

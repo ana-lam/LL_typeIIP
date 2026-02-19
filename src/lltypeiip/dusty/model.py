@@ -49,7 +49,8 @@ class DustyModel:
     """
     
     def __init__(self, folder, Tstar, Tdust, tau, shell_thickness, lam_um, lamFlam,
-                 oid=None, phase_days=None, template_tag=None):
+                 oid=None, phase_days=None, template_tag=None, npz_path=None,
+                 outpath=None):
         self.folder = Path(folder)
         self.Tstar = float(Tstar)
         self.Tdust = float(Tdust)
@@ -70,6 +71,9 @@ class DustyModel:
         self.chi2_red = None
         self.x_plot = None
         self.y_scaled = None
+
+        self.npz_path = str(npz_path) if npz_path is not None else None
+        self.outpath = str(outpath) if outpath is not None else None
     
     def __repr__(self):
         base = f"DustyModel(Tstar={self.Tstar}K, Tdust={self.Tdust}K, tau={self.tau}, thickness={self.shell_thickness}"
@@ -157,9 +161,12 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
 
         for idx, row in df_ok.iterrows():
             loaded = False
+            npz_path_str = None
+            outpath_str = None
             
             if prefer_npz and has_npz and pd.notna(row.get("npz_path")):
                 npz_path = Path(row["npz_path"])
+                npz_path_str = str(npz_path)
                 if npz_path.exists():
                     try:
                         z = np.load(npz_path, allow_pickle=False)
@@ -168,6 +175,9 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
                         
                         # Create model with metadata
                         folder = _make_folder_name(row, is_template_grid)
+
+                        if "outpath" in row and pd.notna(row["outpath"]):
+                            outpath_str = str(row["outpath"])
                         
                         model = DustyModel(
                             folder=folder,
@@ -179,7 +189,9 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
                             lamFlam=lamFlam,
                             oid=row.get("oid") if is_template_grid else None,
                             phase_days=row.get("phase_days") if is_template_grid else None,
-                            template_tag=row.get("template_tag") if is_template_grid else None
+                            template_tag=row.get("template_tag") if is_template_grid else None,
+                            npz_path=npz_path_str,
+                            outpath=outpath_str 
                         )
                         
                         # Populate chi2 if already in CSV
@@ -197,6 +209,7 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
 
             if not loaded and has_outpath and pd.notna(row.get("outpath")):
                 sed_path = Path(row["outpath"])
+                outpath_str = str(sed_path)
                 if sed_path.exists():
                     try:
                         table = ascii.read(sed_path, names=["lam", "flux"], 
@@ -215,7 +228,9 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
                             lamFlam=lamFlam,
                             oid=row.get("oid") if is_template_grid else None,
                             phase_days=row.get("phase_days") if is_template_grid else None,
-                            template_tag=row.get("template_tag") if is_template_grid else None
+                            template_tag=row.get("template_tag") if is_template_grid else None,
+                            npz_path=npz_path_str if npz_path_str else None,
+                            outpath=outpath_str
                         )
                         models.append(model)
                         loaded = True
