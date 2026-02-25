@@ -284,7 +284,7 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
 #     sed : dict
 #         SED dictionary containing 'lam', 'nu', 'Fnu', 'eFnu', etc.
 #     y_mode : str
-#         'Flam' or 'Fnu' — determines whether we compare in λFλ or Fν space.
+#         'Flam' or 'Fnu' — determines whether we compare in lambda F_lambda or F_nu space.
 #     use_weights : bool
 #         Whether to use SED uncertainties as weights in fitting.
 

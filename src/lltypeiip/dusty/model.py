@@ -23,7 +23,7 @@ class DustyModel:
     lam_um : np.ndarray
         Wavelength grid in micrometers.
     lamFlam : np.ndarray
-        λF_λ flux in erg s⁻¹ cm⁻².
+        lambda F_lambda flux in erg s^-1 cm^-2.
 
     # optional for template models
     oid: str or None
@@ -113,7 +113,7 @@ def load_dusty_grid(grid_dir=None, csv_path=None, prefer_npz=True,
     Second, try to load from outpath column (loads from sed.dat).
     Third, from directory structure (scan for sed.dat)
         Looks for subfolders named like 'Tstar_4000_Tdust_1100_tau_0_03_thick_2_0'
-        containing 'sed.dat' with two columns: wavelength [μm], flux [λF_λ].
+        containing 'sed.dat' with two columns: wavelength [microns], flux [lambda F_lambda].
     """
     if csv_path is not None:
         csv_path = Path(csv_path)

@@ -421,7 +421,7 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
     y_mode:
       'Fnu'  -> x = nu [Hz],    y = Fnu [mJy]
       'Flam' -> x = lam [micron],      y = lambda*Flam [erg s^-1 cm^-2]
-               (i.e., λF_λ with λ on the x-axis in micrometers)
+               (i.e., lambdaF_lambda with lambda on the x-axis in micrometers)
     """
 
     nu   = np.asarray(sed["nu"],  float)
@@ -438,19 +438,19 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
         y_label = r"$F_\nu\ \mathrm{(mJy)}$"
 
     elif y_mode == "Flam":
-        # Compute λF_λ directly from F_ν using: λF_λ = (c / λ) * F_ν
+        # Compute lambdaF_lambda directly from F_nu using: lambdaF_lambda = (c / lambda) * F_nu
         # Units:
-        #   F_ν (mJy) -> cgs: 1 mJy = 1e-26 erg s^-1 cm^-2 Hz^-1
+        #   F_nu (mJy) -> cgs: 1 mJy = 1e-26 erg s^-1 cm^-2 Hz^-1
         #   c in cgs: 2.99792458e10 cm/s
-        #   λ in cm: 1 Å = 1e-8 cm
+        #   lambda in cm: 1 Angstroms = 1e-8 cm
         Fnu_cgs   = Fnu  * 1e-26  # erg s^-1 cm^-2 Hz^-1
         eFnu_cgs  = eFnu * 1e-26
         lam_cm    = lam * 1e-8 # cm
         lamF      = (const.c.to('cm/s').value / lam_cm) * Fnu_cgs     # erg s^-1 cm^-2
         e_lamF    = (const.c.to('cm/s').value / lam_cm) * eFnu_cgs
         
-        # x-axis in micrometers (μm): 1 μm = 10,000 Å
-        x  = lam * 1e-4 # μm
+        # x-axis in micrometers (microns): 1 microns = 10,000 Angstroms
+        x  = lam * 1e-4 # microns
         y  = lamF
         ey = e_lamF
 

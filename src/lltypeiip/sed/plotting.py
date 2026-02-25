@@ -13,7 +13,7 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
     inset_lc=None, inset_options=None):
     """
     y_mode='Fnu'  -> Fnu vs nu (mJy, Hz)
-    y_mode='Flam' -> Flam vs λ (cgs/Ang, Ang)
+    y_mode='Flam' -> Flam vs lambda (cgs/Ang, Ang)
 
     inset_lc : dict, optional
         Provide light-curve data to embed as an inset. Expected keys:
@@ -59,15 +59,15 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
         if y_mode == "Fnu":
             secax = ax.secondary_xaxis(
                 'top',
-                functions=(lambda nu: (const.c.value/nu)*1e6,        # ν [Hz] -> λ [µm]
-                        lambda lam_um: const.c.value/(lam_um*1e-6)) # λ [µm] -> ν [Hz]
+                functions=(lambda nu: (const.c.value/nu)*1e6,        # nu [Hz] -> lambda [microns]
+                        lambda lam_um: const.c.value/(lam_um*1e-6)) # lambda [microns] -> nu [Hz]
             )
             secax.set_xlabel(r"$\lambda\ (\mu\mathrm{m})$")
         elif y_mode == "Flam":
             secax = ax.secondary_xaxis(
                 'top',
-                functions=(lambda lam_um: const.c.value/(lam_um*1e-6),  # λ [µm] -> ν [Hz]
-                        lambda nu: (const.c.value/nu)*1e6)           # ν [Hz] -> λ [µm]
+                functions=(lambda lam_um: const.c.value/(lam_um*1e-6),  #  lambda [microns] -> nu [Hz]
+                        lambda nu: (const.c.value/nu)*1e6)           # nu [Hz] -> lambda [microns]
             )
             secax.set_xlabel(r"$\nu\ (\mathrm{Hz})$")
 
