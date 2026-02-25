@@ -52,28 +52,28 @@ run_thick() {
     echo "workdir=$workdir"
     echo "cachedir=$cachedir"
     echo "sed_pkl=$sed_pkl"
-    echo "template_grid_csv=$grid_csv"
+    echo "grid-csv=$grid_csv"
     echo "shell_thickness=$thick"
     echo
 
     stdbuf -oL -eL python -m lltypeiip.inference.run_sed_mcmc "$oid" \
-      --sed-pkl         "$sed_pkl" \
-      --template-path   "$TEMPLATE_PATH" \
-      --template-tag    "$TEMPLATE_TAG" \
-      --template-grid-csv "$grid_csv" \
-      --tstar-dummy     6000 \
+      --sed-pkl "$sed_pkl" \
+      --template-path "$TEMPLATE_PATH" \
+      --template-tag "$TEMPLATE_TAG" \
+      --grid-csv "$grid_csv" \
+      --tstar-dummy 6000 \
       --shell-thickness "$thick" \
-      --mode            mixture \
-      --nsteps          "$NSTEPS" \
-      --burnin          "$BURNIN" \
-      --nwalkers        32 \
-      --ncores          "$ncores" \
-      --mp              fork \
-      --progress-every  500 \
-      --workdir         "$workdir" \
-      --cache-dir       "$cachedir" \
-      --cache-ndigits   4 \
-      --cache-max       5000
+      --mode mixture \
+      --nsteps "$NSTEPS" \
+      --burnin "$BURNIN" \
+      --nwalkers 32 \
+      --ncores "$ncores" \
+      --mp fork \
+      --progress-every 500 \
+      --workdir "$workdir" \
+      --cache-dir "$cachedir" \
+      --cache-ndigits 4 \
+      --cache-max 5000
 
     local ec=$?
     if [ "$ec" -eq 0 ]; then
