@@ -7,6 +7,7 @@ from .ztf import (
     get_ztf_forcedphot,
     get_ztf_lc_data,
     convert_ZTF_mag_mJy,
+    estimate_texp_mjd_from_forced
 )
 
 from .wise import (
@@ -40,6 +41,7 @@ __all__ = [
     'get_ztf_forcedphot',
     'get_ztf_lc_data',
     'convert_ZTF_mag_mJy',
+    'estimate_texp_mjd_from_forced',
     # WISE functions
     'subtract_wise_parity_baseline',
     'get_wise_lc_data',

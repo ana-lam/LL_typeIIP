@@ -1,6 +1,7 @@
 snr:
   min: 3.0
-  min_wise: 2.0 # minimum SNR for WISE detection (more relaxed)
+  min_wise: 2.0 # 3 since DUSTY models are using WISE as a constraint, changed to back to 2 
+  # because ZTF21acpqqgu has no WISE detections at SNR >= 3, but does have some at SNR >= 2.0
 
 
 wavelengths:

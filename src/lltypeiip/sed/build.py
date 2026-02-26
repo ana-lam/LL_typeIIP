@@ -412,6 +412,17 @@ def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0,
             sed["eFnu"].append(e)
             sed["is_ul"].append(False)
             sed["dt_labels"].append(f"Δt={t-mjd0:+.2f} d")
+        elif include_limits:
+            ul = _nearest_ul(times, errs, mjd0, max_dt_wise, n_sigma=3)
+            if ul:
+                t_ul, f_ul = ul
+                sed["bands"].append(b)
+                sed["nu"].append(nu)
+                sed["lam"].append(lam)
+                sed["Fnu"].append(f_ul)
+                sed["eFnu"].append(np.nan)
+                sed["is_ul"].append(True)
+                sed["dt_labels"].append(f"Δt={t_ul-mjd0:+.2f} d (3σ UL)")
 
     return sed
 

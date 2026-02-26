@@ -49,11 +49,19 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
     for b in np.unique(bands):
         sel = (bands == b) & (is_ul)
         if np.any(sel):
-            ln = ax.errorbar(x[sel], y[sel], yerr=None, uplims=True,
-                             fmt="v", markersize=7,
-                             color=SED_COLORS.get(b, "black"),
-                             mec=SED_COLORS.get(b, "black"),
-                             mfc=(0,0,0,0), linestyle="none", label=f"{b} upper limit")
+            # ln = ax.errorbar(x[sel], y[sel], yerr=1e-30*y[sel], uplims=True,
+            #                  fmt="v", markersize=7,
+            #                  color=SED_COLORS.get(b, "black"),
+            #                 #  mec=SED_COLORS.get(b, "black"),
+            #                  mfc=SED_COLORS.get(b, "black"),
+            #                  alpha=0.5,
+            #                  linestyle="none", label=f"{b} upper limit")
+            ln = ax.scatter(x[sel], y[sel],
+                   marker="v", s=60,
+                   facecolors=SED_COLORS.get(b, "black"),
+                   edgecolors=SED_COLORS.get(b, "black"),
+                   alpha=0.5,
+                   label=b + f" UL ({dt[sel][0]})")
     if secax:  
         # secondary axis      
         if y_mode == "Fnu":
@@ -85,6 +93,12 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
     for line in ax.lines:
         mfc = line.get_markerfacecolor()
         mec = line.get_markeredgecolor()
+
+        if line.get_marker() == "v":
+            line.set_markerfacecolor(mcolors.to_rgba(mfc)[:3] + (0.4,))
+            line.set_markeredgecolor(mcolors.to_rgba(mfc)[:3] + (0.4,))  # match edge to face
+            continue
+
         if mfc is None or mfc == "none":
             continue
         if isinstance(mfc, (tuple, list)) and len(mfc) == 4:
@@ -100,24 +114,29 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
         line.set_markersize(7)
 
     # legend: unique entries
+    band_order = ["ZTF_g", "ZTF_r", "ZTF_i", "W1", "W2"]
+
     handles, lbls = ax.get_legend_handles_labels()
     seen, H, L = set(), [], []
+
+    # add in order
+    for b in band_order:
+        for h, l in zip(handles, lbls):
+            if l.startswith(b) and l not in seen:
+                H.append(h)
+                L.append(l)
+                seen.add(l)
+
     for h, l in zip(handles, lbls):
         if l not in seen:
             H.append(h)
             L.append(l)
             seen.add(l)
+
     if H:
         if legend_outside:
-                ax.legend(
-                    H,
-                    L,
-                    fontsize=9,
-                    loc="upper center",
-                    bbox_to_anchor=(0.5, -0.2),
-                    borderaxespad=0.0,
-                    ncol=4,
-                )
+            ax.legend(H, L, fontsize=9, loc="upper center",
+                    bbox_to_anchor=(0.5, -0.2), borderaxespad=0.0, ncol=4)
         else:
             ax.legend(H, L, fontsize=9, loc='lower left')
 
