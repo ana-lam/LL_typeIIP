@@ -71,92 +71,78 @@ def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
     Find best-fit scale factor for DUSTY model to match SED using least-squares.
     """
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
+    is_ul = np.array(sed.get("is_ul", [False] * len(sed["bands"])), dtype=bool)
 
     if y_mode == "Flam":
         x_mod = model.lam_um
         y_mod = model.lamFlam
-
-        # overlap in x
-        mask_data = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
-        x_data = x_sed[mask_data]
-        y_data = y_sed[mask_data]
-        ey_data = ey_sed[mask_data]
-
-        if len(x_data) == 0:
-            model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
-            model.x_plot, model.y_scaled = x_mod, y_mod
-            return model
-        
-        # interpolate model onto observed wavelengths
-        y_mod_on_data = np.interp(x_data, x_mod, y_mod)
-
-        # LS fit for a
-        if use_weights and np.any(ey_data > 0):
-            weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
-            a = np.sum(weights * y_data * y_mod_on_data) / np.sum(weights * y_mod_on_data**2)
-            chi2 = np.sum(weights * (y_data - a*y_mod_on_data)**2)
-        else:
-            a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data**2)
-            chi2 = np.sum((y_data - a*y_mod_on_data)**2)
-
-        N = len(y_data)
-        dof = max(N - 1, 0)
-
-        model.scale = float(a)
-        model.chi2 = float(chi2)
-        model.dof = int(dof)
-        model.chi2_red = float(chi2 / dof) if dof > 0 else np.inf
-        model.x_plot = x_mod
-        model.y_scaled = a * y_mod
-        
-        return model
-    
     elif y_mode == "Fnu":
         lam_cm = model.lam_um * 1e-4
-        nu_mod = const.c.cgs.value / lam_cm  # Hz
+        nu_mod = const.c.cgs.value / lam_cm
         Fnu_mod = model.lamFlam * (lam_cm / const.c.cgs.value)
-
         order = np.argsort(nu_mod)
-        nu_mod = nu_mod[order]
-        Fnu_mod = Fnu_mod[order]
-
-        # overlap in x
-        mask_data = (x_sed >= nu_mod.min()) & (x_sed <= nu_mod.max())
-        x_data = x_sed[mask_data]
-        y_data = y_sed[mask_data]
-        ey_data = ey_sed[mask_data]
-
-        if len(x_data) == 0:
-            model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
-            model.x_plot, model.y_scaled = nu_mod, Fnu_mod
-            return model
-
-        # interpolate model onto observed wavelengths
-        y_mod_on_data = np.interp(x_data, nu_mod, Fnu_mod)
-
-        # LS fit for a
-        if use_weights and np.any(ey_data > 0):
-            weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
-            a = np.sum(weights * y_data * y_mod_on_data) / np.sum(weights * y_mod_on_data**2)
-            chi2 = np.sum(weights * (y_data - a*y_mod_on_data)**2)
-        else:
-            a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data**2)
-            chi2 = np.sum((y_data - a*y_mod_on_data)**2)
-
-        N = len(y_data)
-        dof = max(N - 1, 0)
-
-        model.scale = float(a)
-        model.chi2 = float(chi2)
-        model.dof = int(dof)
-        model.chi2_red = float(chi2 / dof) if dof > 0 else np.inf
-        model.x_plot = nu_mod
-        model.y_scaled = a * Fnu_mod
-
-        return model
-    
+        x_mod = nu_mod[order]
+        y_mod = Fnu_mod[order]
     else:
         raise ValueError("y_mode must be 'Flam' or 'Fnu'")
+
+    # overlap
+    mask_data = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
+    x_data  = x_sed[mask_data]
+    y_data  = y_sed[mask_data]
+    ey_data = ey_sed[mask_data]
+    ul_mask = is_ul[mask_data] 
+
+    if len(x_data) == 0:
+        model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
+        model.x_plot, model.y_scaled = x_mod, y_mod
+        model.n_ul_active = 0
+        return model
+
+    y_mod_on_data = np.interp(x_data, x_mod, y_mod)
+
+    # --- scale from detections only ---
+    det = ~ul_mask
+    x_det, y_det, ey_det = x_data[det], y_data[det], ey_data[det]
+    y_mod_det = y_mod_on_data[det]
+
+    if len(y_det) == 0:
+        model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
+        model.x_plot, model.y_scaled = x_mod, y_mod
+        model.n_ul_active = 0
+        return model
+
+    if use_weights and np.any(ey_det > 0):
+        w = 1.0 / np.clip(ey_det, 1e-99, np.inf)**2
+        a = np.sum(w * y_det * y_mod_det) / np.sum(w * y_mod_det**2)
+        chi2_det = np.sum(w * (y_det - a * y_mod_det)**2)
+    else:
+        a = np.sum(y_det * y_mod_det) / np.sum(y_mod_det**2)
+        chi2_det = np.sum((y_det - a * y_mod_det)**2)
+
+    # UL penalities
+    y_mod_ul = a * y_mod_on_data[ul_mask]
+    y_ul = y_data[ul_mask]
+
+    sigma_ul = y_ul / 3.0 # recover error
+
+    exceeded = y_mod_ul > y_ul
+    excess = y_mod_ul - y_ul
+    chi2_ul = np.sum((excess[exceeded] / sigma_ul[exceeded])**2)
+    n_ul_active = int(np.sum(exceeded))
+
+    chi2 = chi2_det + chi2_ul
+    dof = max(len(y_det) + n_ul_active - 1, 0)
+
+    model.scale = float(a)
+    model.chi2 = float(chi2)
+    model.dof = int(dof)
+    model.chi2_red = float(chi2 / dof) if dof > 0 else np.inf
+    model.n_ul_active = n_ul_active
+    model.x_plot = x_mod
+    model.y_scaled = a * y_mod
+
+    return model
 
 def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weights=True,
                     template_tag=None, top_k=None, max_tstar=6000.0):
@@ -249,7 +235,8 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
             scale=m.scale,
             chi2=m.chi2,
             dof=m.dof,
-            chi2_red=m.chi2_red
+            chi2_red=m.chi2_red,
+            n_ul_active=getattr(m, 'n_ul_active', 0),
         )
 
         if m.npz_path is not None:
