@@ -3,17 +3,17 @@
 Create fitted grid summary CSVs with chi-squared values for each SED.
 
     # Fit blackbody grid to one SED
-    python create_fitted_grid_summaries.py ZTF22abtspsw --mode blackbody --thickness 2.0
+    python -m lltypeiip.dusty.fit_grids ZTF22abtspsw --mode blackbody --thickness 2.0
     
     # Fit template grid to one SED
-    python create_fitted_grid_summaries.py ZTF22abtspsw --mode template --thickness 2.0
+    python -m lltypeiip.dusty.fit_grids ZTF22abtspsw --mode template --thickness 2.0
     
     # Fit grids to all SEDs
-    python create_fitted_grid_summaries.py --all --mode blackbody --thickness 2.0
-    python create_fitted_grid_summaries.py --all --mode template --thickness 2.0
+    python -m lltypeiip.dusty.fit_grids --all --mode blackbody --thickness 2.0
+    python -m lltypeiip.dusty.fit_grids --all --mode template --thickness 2.0
     
     # Both modes, both thicknesses, all SEDs
-    python create_fitted_grid_summaries.py --all --mode both --thickness both
+    python -m lltypeiip.dusty.fit_grids --all --mode both --thickness both
 """
 
 import argparse

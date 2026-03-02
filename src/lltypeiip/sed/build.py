@@ -422,7 +422,7 @@ def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0,
                 sed["Fnu"].append(f_ul)
                 sed["eFnu"].append(np.nan)
                 sed["is_ul"].append(True)
-                sed["dt_labels"].append(f"Δt={t_ul-mjd0:+.2f} d (3σ UL)")
+                sed["dt_labels"].append(f"Δt={t_ul-mjd0:+.2f} d")
 
     return sed
 
