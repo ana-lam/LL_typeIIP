@@ -93,13 +93,11 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
     for line in ax.lines:
         mfc = line.get_markerfacecolor()
         mec = line.get_markeredgecolor()
-
+        if mfc is None or mfc == "none":
+            continue
         if line.get_marker() == "v":
             line.set_markerfacecolor(mcolors.to_rgba(mfc)[:3] + (0.4,))
             line.set_markeredgecolor(mcolors.to_rgba(mfc)[:3] + (0.4,))  # match edge to face
-            continue
-
-        if mfc is None or mfc == "none":
             continue
         if isinstance(mfc, (tuple, list)) and len(mfc) == 4:
             r, g, b, _ = mfc
