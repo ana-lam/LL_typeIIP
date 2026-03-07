@@ -230,7 +230,7 @@ def main():
             **mode_kwargs[mode],
         )
 
-        suffix = "" if args.seed == 42 else f"_seed{args.seed}"
+        suffix = f"_seed{args.seed}"
         thick_str = str(shell_thickness).replace('.', '_')
         outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_thick{thick_str}_{mode}{suffix}.npz"
         outpath = outdir / outname

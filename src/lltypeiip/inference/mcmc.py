@@ -176,12 +176,12 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
         init_scales = dict(tstar_frac=0.25, 
                            tdust_frac=0.25, 
                            log10_tau=0.8, 
-                           log10_a=0.8)
+                           log10_a=1.5)
 
     tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 12000.0))
     tdust_bounds = prior_config.get("tdust_bounds", (100.0, 1500.0))
     log10_tau_bounds = prior_config.get("log10_tau_bounds", (-4.0, 2.0))
-    log10_a_bounds = prior_config.get("log10_a_bounds", (-30.0, 30.0))
+    log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
 
     def draw_around():
         if ndim == 3:
@@ -250,7 +250,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      nwalkers=32, nsteps=4000, burn_in=1000, y_mode="Flam",
                      use_weights=True, n_cores=4, mp_prefer="fork",
                      random_seed=42, posterior_mode="data", mix_weight=0.3,
-                     tdust_sigma_frac=0.5, log10_tau_sigma=0.5, log10_a_sigma=1.0,
+                     tdust_sigma_frac=0.2, log10_tau_sigma=0.5, log10_a_sigma=1.0,
                      init_mode="hybrid", init_scales=None, progress_every=None,
                      cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True,
                      run_tag=None):
@@ -306,7 +306,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         prior_config = dict(
             tdust_bounds=(50., 1500.),
             log10_tau_bounds=(-4., 2.),
-            log10_a_bounds=(-30., 30.),
+            log10_a_bounds=(-20., 0.),
             best=best,
             prior_mode=posterior_mode,
             mix_weight=mix_weight,
@@ -325,7 +325,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             tstar_bounds=(2000., 12000.),
             tdust_bounds=(100., 1500.),
             log10_tau_bounds=(-4., 2.),
-            log10_a_bounds=(-30., 30.),
+            log10_a_bounds=(-20., 0.),
             best=best,
             prior_mode=posterior_mode,
             mix_weight=mix_weight,
@@ -365,6 +365,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             nwalkers, ndim, log_probability,
             args=(sed, dusty_runner, prior_config, y_mode, use_weights,
                   template, template_tag, tstar_dummy, shell_thickness),
+            moves=emcee.moves.StretchMove(a=3.0),
             pool=pool
         )
         print(f"Running MCMC: ndim={ndim}, nwalkers={nwalkers}, nsteps={nsteps}...", flush=True)

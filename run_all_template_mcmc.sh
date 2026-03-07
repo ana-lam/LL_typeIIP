@@ -19,7 +19,7 @@ echo "Logs in           : $LOGDIR"
 echo
 
 parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
-  ./run_one_template_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" \
+  ./run_one_template_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0303 \
   :::: "$OIDS_FILE"
 
 echo

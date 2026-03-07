@@ -195,7 +195,7 @@ def main():
                     7000, 7500, 8000, 8500, 9000, 9500, 10000]
 
     # Inner dust temperature (K): warm silicate near sublimation
-    tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)

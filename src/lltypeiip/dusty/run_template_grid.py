@@ -289,7 +289,7 @@ def main():
     if args.tdust_list:
         tdust_values = _parse_list(args.tdust_list)
     else:
-        tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+        tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
 
     if args.tau_list:
         tau_values = _parse_list(args.tau_list)

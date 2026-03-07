@@ -17,7 +17,7 @@ def _log_mix(lnN, w):
 def log_prior(theta, tstar_bounds=(2000., 15000.), #1000, 15000.
               tdust_bounds=(50., 1500.),
               log10_tau_bounds=(-4, 2.),
-              log10_a_bounds=(-30., 30.),
+              log10_a_bounds=(-20., 0.),
               best=None, prior_mode="data", 
               tstar_sigma_frac=None, tdust_sigma_frac=None,
               log10_tau_sigma=None, log10_a_sigma=None,
@@ -98,8 +98,10 @@ def log_prior(theta, tstar_bounds=(2000., 15000.), #1000, 15000.
         if not (0.0 < w < 1.0):
             raise ValueError("mix_weight must be between 0 and 1")
 
-        lp += _log_mix(ln_tstar, w) + _log_mix(ln_tdust, w) + \
-                _log_mix(ln_log10_tau, w) + _log_mix(ln_log10_a, w)
+        # lp += _log_mix(ln_tstar, w) + _log_mix(ln_tdust, w) + \
+        #         _log_mix(ln_log10_tau, w) + _log_mix(ln_log10_a, w)
+        ln_gaussian_sum = ln_tstar + ln_tdust + ln_log10_tau + ln_log10_a
+        lp += np.logaddexp(np.log(w) + ln_gaussian_sum, np.log(1.0 - w))
         return lp
     
     raise ValueError("prior_mode must be one of: 'data', 'anchored', 'mixture'.")

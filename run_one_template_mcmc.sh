@@ -6,6 +6,9 @@ oid="$1"
 logdir="$2"
 ncores="$3"
 
+# --- seed ---
+SEED="${4:-99}"
+
 # ---- inputs ----
 TAIL_SED_DIR="/home/cal/analam/Documents/LL_typeIIP/data/tail_seds"
 TEMPLATE_PATH="/home/cal/analam/Documents/LL_typeIIP/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
@@ -18,8 +21,8 @@ cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/dusty_npz_cache"
 THICK_VALUES=(2.0 5.0)
 
 # ---- MCMC parameters (PRODUCTION) ----
-NSTEPS=8000
-BURNIN=2000
+NSTEPS=10000
+BURNIN=1000
 
 sed_pkl="${TAIL_SED_DIR}/${oid}_tail_sed.pkl"
 
@@ -73,7 +76,8 @@ run_thick() {
       --workdir "$workdir" \
       --cache-dir "$cachedir" \
       --cache-ndigits 4 \
-      --cache-max 5000
+      --cache-max 5000 \
+      --seed "$SEED"
 
     local ec=$?
     if [ "$ec" -eq 0 ]; then
