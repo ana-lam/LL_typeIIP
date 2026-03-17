@@ -25,6 +25,7 @@ def _unwrap_sed(obj):
 def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2."""
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
+    is_ul = np.array(sed.get("is_ul", np.zeros(len(x_sed), dtype=bool)))
 
     if y_mode == "Flam":
         x_mod = lam_um
@@ -40,25 +41,42 @@ def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=
         raise ValueError("y_mode must be 'Flam' or 'Fnu'")
 
     mask_data = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
-    if not np.any(mask_data):
+
+    det_mask = mask_data & ~is_ul & np.isfinite(ey_sed) & (ey_sed > 0)
+    ul_mask  = mask_data & is_ul
+
+    if not np.any(det_mask):
         return np.nan, np.inf
 
-    x_data = x_sed[mask_data]
-    y_data = y_sed[mask_data]
-    ey_data = ey_sed[mask_data]
+    x_det = x_sed[det_mask]
+    y_det = y_sed[det_mask]
+    ey_det = ey_sed[det_mask]
+    y_mod_det = np.interp(x_det, x_mod, y_mod)
 
-    y_mod_on_data = np.interp(x_data, x_mod, y_mod)
-
+    # -- get analytic scale from detections only --
     if a is None:
-        if use_weights and np.any(ey_data > 0):
-            weights = 1.0 / np.clip(ey_data, 1e-99, np.inf) ** 2
-            a = np.sum(weights * y_data * y_mod_on_data) / np.sum(weights * y_mod_on_data ** 2)
-            chi2 = np.sum(weights * (y_data - a * y_mod_on_data) ** 2)
+        if use_weights and np.any(ey_det > 0):
+            weights = 1.0 / np.clip(ey_det, 1e-99, np.inf) ** 2
+            a = np.sum(weights * y_det * y_mod_det) / np.sum(weights * y_mod_det ** 2)
+            # chi2 = np.sum(weights * (y_det - a * y_mod_det) ** 2)
         else:
-            a = np.sum(y_data * y_mod_on_data) / np.sum(y_mod_on_data ** 2)
-            chi2 = np.sum((y_data - a * y_mod_on_data) ** 2)
+            a = np.sum(y_det * y_mod_det) / np.sum(y_mod_det ** 2)
+            # chi2 = np.sum((y_det - a * y_mod_det) ** 2)
+    # -- compute chi2 --
+    if use_weights:
+        weights = 1.0 / np.clip(ey_det, 1e-99, np.inf) ** 2
+        chi2 = np.sum(weights * (y_det - a * y_mod_det) ** 2)
     else:
-        chi2 = compute_chi2(lam_um, lamFlam, sed, a, y_mode=y_mode, use_weights=use_weights)[1]
+        chi2 = np.sum((y_det - a * y_mod_det) ** 2)
+
+    # -- UL penalities --
+    if np.any(ul_mask):
+        x_ul = x_sed[ul_mask]
+        y_ul = y_sed[ul_mask]
+        y_mod_ul = a * np.interp(x_ul, x_mod, y_mod)
+        ul_sigma  = y_ul / 3.0
+        excess = y_mod_ul - y_ul
+        chi2 += np.sum(np.where(excess > 0, (excess / ul_sigma) ** 2, 0.0))
 
     return float(a), float(chi2)
 
@@ -250,7 +268,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      nwalkers=32, nsteps=4000, burn_in=1000, y_mode="Flam",
                      use_weights=True, n_cores=4, mp_prefer="fork",
                      random_seed=42, posterior_mode="data", mix_weight=0.3,
-                     tdust_sigma_frac=0.2, log10_tau_sigma=0.5, log10_a_sigma=1.0,
+                     tdust_sigma_frac=0.2, log10_tau_sigma=0.3, log10_a_sigma=1.0,
                      init_mode="hybrid", init_scales=None, progress_every=None,
                      cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True,
                      run_tag=None):

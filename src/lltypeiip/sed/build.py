@@ -249,11 +249,25 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
 
     params_df = pd.read_csv(csv_path)
     m = params_df[['name', 'plateauend', 'tailstart']].dropna()
-    m_dict = dict(zip(m['name'].astype(str), m['plateauend'].astype(float))) # use plateau end for tail start
+    if include_plateau_epoch:
+        m_dict_plateauend = dict(zip(m['name'].astype(str), m['plateauend'].astype(float))) 
+        m_dict_tailstart = dict(zip(m['name'].astype(str), m['tailstart'].astype(float))) 
+        delta_days = m_dict_tailstart[oid] - m_dict_plateauend[oid] if oid in m_dict_plateauend and oid in m_dict_tailstart else None
+        if delta_days > 0:
+            halfway = delta_days / 2
+            t_tail = m_dict_plateauend[oid] + halfway
+        else:
+            t_tail = m_dict_tailstart[oid] if oid in m_dict_tailstart else None
+        print("T_TAIL ACTUAL OFFSET FROM TAIL START:", m_dict_tailstart[oid]-t_tail, f"(tailstart-t_tail, tailstart={m_dict_tailstart[oid]}, t_tail={t_tail})")
+    else:
+        m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float))) # use tail start directly
+        t_tail = m_dict[oid] if oid in m_dict else None
 
-    if oid not in m_dict or not np.isfinite(m_dict[oid]):
+    if t_tail is None:
         return []
-    t_tail = float(m_dict[oid]) + float(tail_offset_days) # shift tail start time/plateau end time
+
+
+    t_tail = t_tail + float(tail_offset_days) # shift tail start time/plateau end time
 
     # ---- candidate epochs from WISE ----
     
@@ -311,6 +325,7 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
             seds.append(sed)
             print(f"  Accepted SED at MJD={mjd0:.2f} | bands={sed['bands']} "
                   f"| max_dt_ztf_actual={sed['max_dt_ztf_actual']:.2f} d")
+            print("SED MJD ACTUAL OFFSET FROM TAIL START:", m_dict_tailstart[oid] - mjd0, f"(tailstart-mjd0, tailstart={m_dict_tailstart[oid]}, mjd0={mjd0})")
 
     return seds
 
