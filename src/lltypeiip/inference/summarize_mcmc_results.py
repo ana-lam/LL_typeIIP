@@ -94,7 +94,7 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     thick_str = str(thickness).replace('.', '_')
     tag = _mcmc_tag(mode)
 
-    if seed is not None:
+    if seed is None:
         mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}.npz"
     else:
         mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}.npz"
@@ -161,7 +161,7 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     # compute both chi2
     def _evaluate(tdust, log10_tau, log10_a, tstar):
         tau = 10.0 ** log10_tau
-        lam_um, lamFlam = runner.evaluate_model(
+        lam_um, lamFlam, r1 = runner.evaluate_model(
             tstar=tstar,
             tdust=tdust,
             tau=tau,
@@ -196,7 +196,7 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
 
     # ---- evaluate at median ----
     med_res = _evaluate(tdust_med, log10_tau_med, log10_a_med,
-                        tdust_med if tag == "template" else tstar_med)
+                        TSTAR_DUMMY if tag == "template" else tstar_med)
     # ---- evaluate at MAP ----
     map_res = _evaluate(tdust_map, log10_tau_map, log10_a_map,
                         TSTAR_DUMMY if tag == "template" else tstar_map)
@@ -242,18 +242,18 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
         log10_a_map = log10_a_map,
         tau_map = 10.0 ** log10_tau_map,
         # chi2 at median
-        scale_analytic_med = med_res["scale_analytic"]    if med_res else None,
-        chi2_analytic_med = med_res["chi2_analytic"]     if med_res else None,
+        scale_analytic_med = med_res["scale_analytic"] if med_res else None,
+        chi2_analytic_med = med_res["chi2_analytic"] if med_res else None,
         chi2_red_analytic_med = med_res["chi2_red_analytic"] if med_res else None,
-        chi2_mcmc_med = med_res["chi2_mcmc"]         if med_res else None,
-        chi2_red_mcmc_med  = med_res["chi2_red_mcmc"]     if med_res else None,
-        dof = med_res["dof"]               if med_res else None,
+        chi2_mcmc_med = med_res["chi2_mcmc"] if med_res else None,
+        chi2_red_mcmc_med  = med_res["chi2_red_mcmc"] if med_res else None,
+        dof = med_res["dof"] if med_res else None,
         # chi2 at MAP
-        scale_analytic_map = map_res["scale_analytic"]    if map_res else None,
-        chi2_analytic_map = map_res["chi2_analytic"]     if map_res else None,
+        scale_analytic_map = map_res["scale_analytic"] if map_res else None,
+        chi2_analytic_map = map_res["chi2_analytic"] if map_res else None,
         chi2_red_analytic_map = map_res["chi2_red_analytic"] if map_res else None,
-        chi2_mcmc_map = map_res["chi2_mcmc"]         if map_res else None,
-        chi2_red_mcmc_map = map_res["chi2_red_mcmc"]     if map_res else None,
+        chi2_mcmc_map = map_res["chi2_mcmc"] if map_res else None,
+        chi2_red_mcmc_map = map_res["chi2_red_mcmc"] if map_res else None,
         # grid best for reference
         grid_tdust = grid_best.get("tdust"),
         grid_log10_tau = grid_best.get("log10_tau"),
@@ -284,13 +284,13 @@ def main():
                         default="both")
     parser.add_argument("--thickness",
                         help="Shell thickness: 2.0, 5.0, or 'both'", default="both")
-    parser.add_argument("--seed", type=int,  default=303)
+    parser.add_argument("--seed", type=int,  default=None)
     parser.add_argument("--mcmc-mode", default="mixture")
     parser.add_argument("--mcmc-dir", default=str(DEFAULT_MCMC_DIR))
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
+    parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--sed-dir", default=str(DEFAULT_SED_DIR))
     parser.add_argument("--workdir", default=str(DEFAULT_WORKDIR))
-    parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
+    parser.add_argument("--cache-dir", default=str(DEFAULT_DUSTY_CACHE_DIR))
 
     args = parser.parse_args()
 
@@ -322,7 +322,7 @@ def main():
         for mode in modes:
             for thickness in thicknesses:
                 print(f"  {mode} thick={thickness}")
-                row = summarize_one(
+                row = summarize_mcmc_results(
                     oid=oid, mode=mode, thickness=thickness,
                     mcmc_dir=mcmc_dir, out_dir=out_dir,
                     sed_dir=sed_dir, workdir=workdir,
@@ -362,7 +362,16 @@ def main():
 
     # --- save ---
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"mcmc_summary_seed{args.seed}.csv"
+    if mode == "both":
+        if args.seed is not None:
+            out_path = out_dir / f"mcmc_summary_seed{args.seed}.csv"
+        else:
+            out_path = out_dir / "mcmc_summary.csv"
+    else:
+        if args.seed is not None:
+            out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}.csv"
+        else:
+            out_path = out_dir / f"mcmc_summary_{mode}.csv"
     df.to_csv(out_path, index=False)
 
     print(f"\n{'='*60}")

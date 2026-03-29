@@ -21,6 +21,7 @@ mkdir -p "$logdir" "$cachedir"
 # Loop over both thickness values
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
+  fitted_csv="/home/cal/analam/Documents/LL_typeIIP/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
   GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
 
   # sanity check for this thickness's grid
@@ -37,12 +38,14 @@ for thick in "${THICK_VALUES[@]}"; do
     echo "workdir=$workdir"
     echo "cachedir=$cachedir"
     echo "grid_csv=$GRID_CSV"
+    echo "fitted_grid_csv=$fitted_csv"
     echo "shell_thickness=$thick"
     echo
 
     # Make output line-buffered so you see progress in the log immediately
     stdbuf -oL -eL python -m lltypeiip.inference.run_sed_mcmc "$oid" \
       --grid-csv "$GRID_CSV" \
+      --fitted-grid-csv "$fitted_csv" \
       --shell-thickness "$thick" \
       --mode mixture \
       --nsteps "$NSTEPS" \

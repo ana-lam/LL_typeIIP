@@ -33,6 +33,9 @@ def parse_args():
     p.add_argument("--template-tag", type=str, default="nugent_iip")
     p.add_argument("--grid-csv", type=str, default=None,
                    help="CSV from running grids, used to pick best row for initialization.")
+    p.add_argument("--fitted-grid-csv", type=str, default=None,
+               help="Pre-fitted grid CSV (from fit_grids.py). "
+                    "If provided, skips re-fitting and uses this directly.")
     p.add_argument("--tstar-dummy", type=float, default=6000.0)
 
     # optionally load one saved sed pickle instead of rebuilding
@@ -146,27 +149,33 @@ def main():
         print(f"Template mode phase_days={sed.get('phase_days')} template={args.template_tag}")
 
     # grid fitting
-    print("Running grid fit...")
-
-    if args.grid_csv is None:
-        raise RuntimeError("Requires --grid-csv from running grids")
-    
-    grid_csv = Path(args.grid_csv).resolve()
-
-    if not grid_csv.exists():
-        raise RuntimeError(f"Grid CSV not found: {grid_csv}")
-    
-    print(f"Loading grid from: {grid_csv}")
-    
-    df = fit_grid_to_sed(
-        grid_csv=str(grid_csv),
-        sed=sed,
-        shell_thickness=args.shell_thickness,
-        template_tag=args.template_tag if template_mode else None,
-        y_mode="Flam",
-        use_weights=True,
-        top_k=None  # load all models
-    )
+    if args.fitted_grid_csv is not None:
+        fitted_csv = Path(args.fitted_grid_csv).resolve()
+        if not fitted_csv.exists():
+            raise RuntimeError(f"Fitted grid CSV not found: {fitted_csv}")
+        print(f"Loading pre-fitted grid from: {fitted_csv}")
+        df = pd.read_csv(fitted_csv)
+        df_oid = df[df["oid"] == oid] if "oid" in df.columns else df
+        if df_oid.empty:
+            raise RuntimeError(f"No rows for oid={oid} in {fitted_csv}")
+        df = df_oid.sort_values("chi2_red").reset_index(drop=True)
+        print(f"Loaded {len(df)} pre-fitted models for {oid}")
+    elif args.grid_csv is not None:
+        grid_csv = Path(args.grid_csv).resolve()
+        if not grid_csv.exists():
+            raise RuntimeError(f"Grid CSV not found: {grid_csv}")
+        print(f"Fitting grid from: {grid_csv}")
+        df = fit_grid_to_sed(
+            grid_csv=str(grid_csv),
+            sed=sed,
+            shell_thickness=args.shell_thickness,
+            template_tag=args.template_tag if template_mode else None,
+            y_mode="Flam",
+            use_weights=True,
+            top_k=None
+        )
+    else:
+        raise RuntimeError("Requires either --grid-csv or --fitted-grid-csv")
 
     tstar = df.iloc[0]['tstar'] if 'tstar' in df.columns else df.iloc[0]['tstar_dummy'] if 'tstar_dummy' in df.columns else None
     print(f"Loaded {len(df)} grid models")

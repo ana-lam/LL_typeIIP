@@ -21,8 +21,8 @@ cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/dusty_npz_cache"
 THICK_VALUES=(2.0 5.0)
 
 # ---- MCMC parameters (PRODUCTION) ----
-NSTEPS=10000
-BURNIN=1000
+NSTEPS=15000
+BURNIN=3000
 
 sed_pkl="${TAIL_SED_DIR}/${oid}_tail_sed.pkl"
 
@@ -35,6 +35,7 @@ mkdir -p "$logdir" "$cachedir"
 # ---- sanity check all grids ----
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
+  fitted_csv="/home/cal/analam/Documents/LL_typeIIP/fitted_grids/template/thick_${thick_str}/all_objects_template_thick${thick_str}_fitted.csv"
   grid_csv="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
   [ -f "$grid_csv" ] || { echo "!!! Missing template grid CSV: $grid_csv"; exit 4; }
 done
@@ -56,6 +57,7 @@ run_thick() {
     echo "cachedir=$cachedir"
     echo "sed_pkl=$sed_pkl"
     echo "grid-csv=$grid_csv"
+    echo "fitted_grid_csv=$fitted_csv"
     echo "shell_thickness=$thick"
     echo
 
@@ -63,13 +65,14 @@ run_thick() {
       --sed-pkl "$sed_pkl" \
       --template-path "$TEMPLATE_PATH" \
       --template-tag "$TEMPLATE_TAG" \
+      --fitted-grid-csv "$fitted_csv" \
       --grid-csv "$grid_csv" \
       --tstar-dummy 6000 \
       --shell-thickness "$thick" \
       --mode mixture \
       --nsteps "$NSTEPS" \
       --burnin "$BURNIN" \
-      --nwalkers 32 \
+      --nwalkers 64 \
       --ncores "$ncores" \
       --mp fork \
       --progress-every 500 \
