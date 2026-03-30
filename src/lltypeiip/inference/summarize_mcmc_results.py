@@ -123,8 +123,8 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     
     def _stats(vals):
         med = np.median(vals)
-        lo = np.percentile(vals, 16)
-        hi = np.percentile(vals, 84) - med
+        lo = med - np.percentile(vals, 16)  # lower uncertainty
+        hi = np.percentile(vals, 84) - med  # upper uncertainty
         return med, lo, hi
     
     tdust_med, tdust_lo, tdust_hi = _stats(tdust_samples)
