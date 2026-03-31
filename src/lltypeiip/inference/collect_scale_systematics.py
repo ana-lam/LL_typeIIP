@@ -17,7 +17,7 @@ from lltypeiip.config import PROJECT_ROOT
 # defaults
 DEFAULT_FITTED_GRID_DIR = PROJECT_ROOT / "fitted_grids"
 DEFAULT_MCMC_SUMMARY_DIR = PROJECT_ROOT / "mcmc_results/summaries"
-DEFAULT_OUT_DIR = PROJECT_ROOT / "scale_results"
+DEFAULT_OUT_DIR = PROJECT_ROOT / "results/scale"
 
 def load_mcmc_summary(mcmc_summary_dir, mode, seed=None):
     d = Path(mcmc_summary_dir)
