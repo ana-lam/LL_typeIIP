@@ -32,7 +32,7 @@ def load_mcmc_summary(mcmc_summary_dir, mode, seed=None):
             break
     
     if not path.exists():
-        print(f"  [warn] No MCMC summary found for mode={mode} (tried {path})")
+        print(f"No MCMC summary found for mode={mode} (tried {path})")
         return None
     
     print(f"  Loading MCMC summary: {path}")
@@ -44,10 +44,10 @@ def load_fitted_grid_best(fitted_grid_dir, mode, thickness):
             / f"all_objects_{mode}_thick{thick_str}_fitted.csv")
 
     if not path.exists():
-        print(f"  [warn] Fitted grid CSV not found: {path}")
+        print(f"Fitted grid CSV not found: {path}")
         return None
 
-    print(f"  Loading fitted grid: {path}")
+    print(f"Loading fitted grid: {path}")
     df = pd.read_csv(path)
 
     # keep only best chi2_red row per object
@@ -60,6 +60,8 @@ def load_fitted_grid_best(fitted_grid_dir, mode, thickness):
 def main():
 
     parser = argparse.ArgumentParser(description="Collect log10_a estimates across all model combinations and compute systematics")
+
+    parser.add_argument("--include_grid", action="store_true", help="Include fitted grid best fits in the comparison")
     
     parser.add_argument("--fitted-grid-dir", type=str, default=DEFAULT_FITTED_GRID_DIR,
                         help="Base directory where fitted grid CSVs are stored (organized by mode/thickness).")
@@ -67,6 +69,9 @@ def main():
                         help="Directory where MCMC summary CSVs are stored.")
     parser.add_argument("--out-dir", type=str, default=DEFAULT_OUT_DIR,
                         help="Directory to save the combined results with systematics.")
+
+    parser.add_argument("--out-path-suffix", type=str, default="", help="Suffix to add to the output CSV filename (before .csv)")
+    
     parser.add_argument("--template-seed", type=int, default=None)
     parser.add_argument("--bb-seed", type=int, default=None)
 
@@ -78,12 +83,13 @@ def main():
     df_bb_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "blackbody", seed=args.bb_seed)
 
     # load fitted grid best fits
-    print("\nLoading fitted grid bests...")
-    grid_data = {}
-    for mode in ["blackbody", "template"]:
-        for thick in [2.0, 5.0]:
-            key = f"{mode}_thick{thick}"
-            grid_data[key] = load_fitted_grid_best(args.fitted_grid_dir, mode, thick)
+    if args.include_grid:
+        print("Loading fitted grid bests...")
+        grid_data = {}
+        for mode in ["blackbody", "template"]:
+            for thick in [2.0, 5.0]:
+                key = f"{mode}_thick{thick}"
+                grid_data[key] = load_fitted_grid_best(args.fitted_grid_dir, mode, thick)
     
     sed_sample_path = PROJECT_ROOT / "sed_sample.txt"
     with open(sed_sample_path) as f:
@@ -94,17 +100,18 @@ def main():
     for oid in all_oids:
         row = {"oid": oid}
         
-        # grid log10_a values
-        for mode in ["blackbody", "template"]:
-            for thick in [2.0, 5.0]:
-                key = f"{mode}_thick{thick}"
-                col = f"grid_{mode}_t{int(thick)}_log10_a"
-                df_g = grid_data[key]
-                if df_g is not None:
-                    match = df_g[df_g["oid"] == oid]
-                    row[col] = float(match["log10_a"].iloc[0]) if not match.empty else np.nan
-                else:
-                    row[col] = np.nan
+        if args.include_grid:
+            # grid log10_a values
+            for mode in ["blackbody", "template"]:
+                for thick in [2.0, 5.0]:
+                    key = f"{mode}_thick{thick}"
+                    col = f"grid_{mode}_t{int(thick)}_log10_a"
+                    df_g = grid_data[key]
+                    if df_g is not None:
+                        match = df_g[df_g["oid"] == oid]
+                        row[col] = float(match["log10_a"].iloc[0]) if not match.empty else np.nan
+                    else:
+                        row[col] = np.nan
         
         # MCMC log10_a values (scale_analytic_map at MAP T_dust, tau)
         for mode, df_mcmc in [("template", df_tmpl_mcmc), ("blackbody", df_bb_mcmc)]:
@@ -153,17 +160,18 @@ def main():
     df_out = pd.DataFrame(rows)
 
     id_cols = ["oid", "n_estimates", "log10_a_mean", "log10_a_sys_std", "log10_a_sys_halfrange"]
-    grid_cols = sorted([c for c in df_out.columns if c.startswith("grid_")])
-    mcmc_cols = sorted([c for c in df_out.columns if c.startswith("mcmc_")])
-    df_out = df_out[id_cols + grid_cols + mcmc_cols]
+    if args.include_grid:
+        id_cols += [c for c in df_out.columns if c.startswith("grid_")]
+    id_cols += sorted([c for c in df_out.columns if c.startswith("mcmc_")])
+    df_out = df_out[id_cols]
 
-    out_path = Path(args.out_dir) / "log10_a_systematics.csv"
+    out_path = Path(args.out_dir) / f"log10_a_systematics_{args.out_path_suffix}.csv"
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     df_out.to_csv(out_path, index=False)
 
-    print(f"\nSaved -> {out_path}")
+    print(f"Saved -> {out_path}")
     print(f"Rows: {len(df_out)}  columns: {list(df_out.columns)}")
-    print("\nSample (first 5 objects):")
+    print("Sample (first 5 objects):")
     print(df_out[["oid", "log10_a_mean", "log10_a_sys_std", "log10_a_sys_halfrange", "n_estimates"]]
           .head().to_string(index=False))
 

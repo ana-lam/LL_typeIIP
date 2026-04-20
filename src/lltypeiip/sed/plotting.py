@@ -156,7 +156,6 @@ def plot_sed(sed, ax=None, y_mode ="Fnu", logy=False, logx=False,
             }
             if inset_options:
                 inset_kwargs.update(inset_options)
-                print(inset_kwargs)
 
             ax_inset = inset_axes(ax, width="30%", height="30%", loc="upper right", borderpad=1.1)
             plot_combined_lc(

@@ -727,7 +727,9 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
     ref_band : str
         Reference band for scaling WISE fluxes ("g", "r", or "i").
     """
-    
+
+    oid=ztf_resdict['oid']
+
     # Helper: log-safe clipping
     def log_safe(y, yerr=None):
         y = np.asarray(y, dtype=float)
@@ -858,7 +860,6 @@ def plot_combined_lc(ztf_resdict, wise_resdict, oid="ZTF+WISE source",
         ax2.legend()
         fig.subplots_adjust(hspace=0.0)
         fig.suptitle(f"ZTF + WISE Light Curve: {oid}", fontsize=16, y=0.93)
-
         if mark_tail_start and oid in m_dict:
             tail_start = m_dict[oid]
             for ax in (ax1, ax2):

@@ -27,6 +27,10 @@ def parse_args():
     # required
     p.add_argument("oid", type=str, help="ZTF object ID (e.g. ZTF22abtspsw)")
 
+    p.add_argument("--run-id", type=str, default="",
+               help="Optional suffix to distinguish runs (e.g. 'no_i_band'). "
+                    "Appended to output filenames and run tags.")
+
     # template mode
     p.add_argument("--template-path", type=str, default=None,
                    help="If set: use Spectrum=5 template mode.")
@@ -212,7 +216,9 @@ def main():
 
     for mode in modes:
         print(f"\n=== Running mode: {mode} ===", flush=True)
-        run_tag = f"{oid}_{('tmpl' if template_mode else 'bb')}_thick{str(shell_thickness).replace('.', '_')}_{mode}_seed{args.seed}"
+        
+        run_id_suffix = f"_{args.run_id}" if args.run_id else ""
+        run_tag = f"{oid}_{('tmpl' if template_mode else 'bb')}_thick{str(shell_thickness).replace('.', '_')}_{mode}_seed{args.seed}{run_id_suffix}"
 
         results = run_mcmc_for_sed(
             sed=sed,
@@ -241,7 +247,7 @@ def main():
 
         suffix = f"_seed{args.seed}"
         thick_str = str(shell_thickness).replace('.', '_')
-        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_thick{thick_str}_{mode}{suffix}.npz"
+        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_thick{thick_str}_{mode}{suffix}{run_id_suffix}.npz"
         outpath = outdir / outname
 
         np.savez(

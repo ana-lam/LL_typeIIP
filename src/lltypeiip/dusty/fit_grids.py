@@ -25,9 +25,13 @@ from tqdm import tqdm
 
 from lltypeiip.dusty import fit_grid_to_sed
 
-def load_sed(oid, sed_dir="data/tail_seds"):
+def load_sed(oid, sed_dir="data/tail_seds", adhoc_fix=None):
     """Load SED for given OID."""
-    sed_path = Path(sed_dir) / f"{oid}_tail_sed.pkl"
+
+    if adhoc_fix is not None:
+        sed_path = Path(sed_dir) / f"{oid}_tail_sed_{adhoc_fix}.pkl"
+    else:
+        sed_path = Path(sed_dir) / f"{oid}_tail_sed.pkl"
 
     if not sed_path.exists():
         raise FileNotFoundError(f"SED not found: {sed_path}")
@@ -49,7 +53,7 @@ def load_sed(oid, sed_dir="data/tail_seds"):
     return sed
 
 def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
-                               output_dir="fitted_grids", max_tstar=6000.0):
+                               output_dir="fitted_grids", max_tstar=6000.0, adhoc_fix=None):
     """
     Fit grid to SED and save summary CSV.
 
@@ -74,7 +78,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
 
     # load SED
     print(f"Loading SED for {oid}...")
-    sed = load_sed(oid, sed_dir=sed_dir)
+    sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
 
     # construct grid CSV path
     thick_str = str(thickness).replace('.', '_')
@@ -140,7 +144,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # save fitted grid
-    output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
+    output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
     output_path = output_dir / output_filename
     
     df_fitted.to_csv(output_path, index=False)
@@ -154,7 +158,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     return output_path
 
-def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids"):
+def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", adhoc_fix=None):
     """
     Create combined summary CSV for multiple OIDs.
     """
@@ -165,7 +169,7 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
         try:
             # create individual fitted grid
             output_path = create_fitted_grid_summary(
-                oid, mode, thickness, sed_dir, output_dir
+                oid, mode, thickness, sed_dir, output_dir, adhoc_fix
             )
             
             # load the fitted results
@@ -186,7 +190,7 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
     # save combined CSV
     thick_str = str(thickness).replace('.', '_')
     output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
-    combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
+    combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
     
     df_combined.to_csv(combined_path, index=False)
     print(f"\nSaved combined summary: {combined_path}")
@@ -227,6 +231,8 @@ def main():
                        help="Directory containing SED pickles")
     parser.add_argument("--output-dir", default="fitted_grids",
                        help="Directory to save fitted grid summaries")
+    parser.add_argument("--adhoc-fix", default=None,
+                       help="Ad-hoc fix tag for SED filename (e.g., 'no_i_band')")
     
     args = parser.parse_args()
 
@@ -265,13 +271,13 @@ def main():
                 # Single object
                 create_fitted_grid_summary(
                     oids[0], mode, thickness, 
-                    args.sed_dir, args.output_dir
+                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix
                 )
             else:
                 # create combined summary
                 create_combined_summary(
                     oids, mode, thickness,
-                    args.sed_dir, args.output_dir
+                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix
                 )
     
     print("\n" + "="*70)

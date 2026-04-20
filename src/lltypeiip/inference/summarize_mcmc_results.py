@@ -8,6 +8,9 @@ log10a.
 
     # All objects, both modes, both thicknesses
     python -m lltypeiip.inference.summarize_mcmc_results --all --mode both --thickness both --seed 303
+
+    # adhoc fix
+    python -m lltypeiip.inference.summarize_mcmc_results ZTF22aaywnyg --mode template --thickness both --seed 317 --adhoc-fix no_i_band
 """
 
 import argparse
@@ -85,7 +88,7 @@ def _compute_chi2_mcmc(lam_um, lamFlam, sed, log10_a, y_mode="Flam"):
 def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR, 
                           out_dir=DEFAULT_OUTPUT_DIR, sed_dir=DEFAULT_SED_DIR, 
                           workdir=DEFAULT_WORKDIR, cache_dir=DEFAULT_DUSTY_CACHE_DIR,
-                          mcmc_mode="mixture", seed=None, y_mode="Flam"):
+                          mcmc_mode="mixture", seed=None, y_mode="Flam", adhoc_fix=None):
     """
     Summarize MCMC results for a single object, mode, and thickness. 
     Returns list of dicts for median row, MAP row.
@@ -97,7 +100,10 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     if seed is None:
         mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}.npz"
     else:
-        mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}.npz"
+        if adhoc_fix is not None:
+            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}_{adhoc_fix}.npz"
+        else:
+            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}.npz"
 
     try:
         sed = load_sed(oid, sed_dir=sed_dir)
@@ -285,6 +291,8 @@ def main():
     parser.add_argument("--thickness",
                         help="Shell thickness: 2.0, 5.0, or 'both'", default="both")
     parser.add_argument("--seed", type=int,  default=None)
+    parser.add_argument("--adhoc-fix", type=str, default=None,
+                        help="Ad-hoc fix to apply to specific objects (e.g. 'no_i_band')")
     parser.add_argument("--mcmc-mode", default="mixture")
     parser.add_argument("--mcmc-dir", default=str(DEFAULT_MCMC_DIR))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -329,6 +337,7 @@ def main():
                     cache_dir=cache_dir,
                     mcmc_mode=args.mcmc_mode,
                     seed=args.seed,
+                    adhoc_fix=args.adhoc_fix,
                 )
                 if row is not None:
                     all_rows.append(row)
@@ -364,12 +373,18 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     if mode == "both":
         if args.seed is not None:
-            out_path = out_dir / f"mcmc_summary_seed{args.seed}.csv"
+            if args.adhoc_fix is not None:
+                out_path = out_dir / f"mcmc_summary_seed{args.seed}_{args.oid}_{args.adhoc_fix}.csv"
+            else:
+                out_path = out_dir / f"mcmc_summary_seed{args.seed}.csv"
         else:
             out_path = out_dir / "mcmc_summary.csv"
     else:
         if args.seed is not None:
-            out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}.csv"
+            if args.adhoc_fix is not None:
+                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}_{args.oid}_{args.adhoc_fix}.csv"
+            else:
+                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}.csv"
         else:
             out_path = out_dir / f"mcmc_summary_{mode}.csv"
     df.to_csv(out_path, index=False)
