@@ -9,18 +9,8 @@ from pathlib import Path
 from ..dusty.runner import DustyRunner
 from ..dusty.scaling import compute_chi2
 from ..dusty.custom_spectrum import NugentIIPSeries
-from ..sed.build import _prepare_sed_xy
+from ..sed.build import _prepare_sed_xy, _unwrap_sed
 from .priors import log_prior
-
-
-def _unwrap_sed(obj):
-    """Unwrap SED dict"""
-    if isinstance(obj, dict) and "sed" in obj and isinstance(obj["sed"], dict):
-        sed = obj["sed"]
-        if "phase_days" not in sed and "phase" in obj:
-            sed["phase_days"] = obj["phase"]
-        return sed
-    return obj
 
 def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2."""

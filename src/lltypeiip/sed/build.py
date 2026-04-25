@@ -6,6 +6,14 @@ from ..config import config, SNR_MIN, SNR_MIN_WISE, LAM_EFF
 from ..photometry.wise import subtract_wise_parity_baseline
 from ..photometry.ztf import estimate_texp_mjd_from_forced
 
+def _unwrap_sed(obj):
+    """Unwrap SED dict"""
+    if isinstance(obj, dict) and "sed" in obj and isinstance(obj["sed"], dict):
+        sed = obj["sed"]
+        if "phase_days" not in sed and "phase" in obj:
+            sed["phase_days"] = obj["phase"]
+        return sed
+    return obj
 
 def _merge_epochs(times, merge_dt=1.0):
     """

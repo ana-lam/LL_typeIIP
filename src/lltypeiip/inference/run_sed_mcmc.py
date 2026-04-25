@@ -9,6 +9,7 @@ import pickle
 import pandas as pd
 
 from ..sed import build_multi_epoch_seds_from_tail
+from ..sed.build import _unwrap_sed
 from .mcmc import run_mcmc_for_sed
 from ..config import config, PROJECT_ROOT
 from ..photometry import get_wise_lc_data, get_ztf_lc_data, convert_ZTF_mag_mJy
@@ -79,15 +80,6 @@ def parse_args():
                    help="Shell thickness (Y_out/Y_in). Default: 2.0")
 
     return p.parse_args()
-
-def _unwrap_sed(obj):
-    """Unwrap SED from pickle payload if needed."""
-    if isinstance(obj, dict) and "sed" in obj and isinstance(obj["sed"], dict):
-        sed = obj["sed"]
-        if "phase_days" not in sed and "phase" in obj:
-            sed["phase_days"] = obj["phase"]
-        return sed
-    return obj
 
 def main():
     

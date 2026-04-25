@@ -6,6 +6,7 @@ from .build import (
     _nearest_ul,
     _sed_has_required_detections,
     _prepare_sed_xy,
+    _unwrap_sed,
 )
 
 from .plotting import (
@@ -22,6 +23,7 @@ __all__ = [
     '_nearest_ul',
     '_sed_has_required_detections',
     '_prepare_sed_xy',
+    '_unwrap_sed',
     # Plotting functions
     'plot_sed',
 ]
