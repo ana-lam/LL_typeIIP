@@ -2,17 +2,19 @@
 set -u
 set -o pipefail
 
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
 oid="$1"
 logdir="$2"
 ncores="$3"
 
 # ---- inputs ----
-TAIL_SED_DIR="/home/cal/analam/Documents/LL_typeIIP/data/tail_seds"
-TEMPLATE_PATH="/home/cal/analam/Documents/LL_typeIIP/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
+TAIL_SED_DIR="${PROJECT_ROOT}/data/tail_seds"
+TEMPLATE_PATH="${PROJECT_ROOT}/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
 TEMPLATE_TAG="nugent_iip"
 
 # ---- cache (shared across both thickness runs) ----
-cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/dusty_npz_cache"
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
@@ -32,7 +34,7 @@ mkdir -p "$logdir" "$cachedir"
 # Loop over both thickness values
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
-  TEMPLATE_GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
+  TEMPLATE_GRID_CSV="${PROJECT_ROOT}/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
 
   # sanity check for this thickness's grid
   [ -f "$TEMPLATE_GRID_CSV" ] || { echo "!!! Missing template grid CSV: $TEMPLATE_GRID_CSV"; exit 4; }

@@ -24,6 +24,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from lltypeiip.dusty import fit_grid_to_sed
+from lltypeiip.config import get_grid_csv_path 
 
 def load_sed(oid, sed_dir="data/tail_seds", adhoc_fix=None):
     """Load SED for given OID."""
@@ -81,14 +82,9 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
 
     # construct grid CSV path
-    thick_str = str(thickness).replace('.', '_')
+    grid_csv = get_grid_csv_path(mode, thickness)
 
-    if mode == 'blackbody':
-        grid_csv = f"dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_{thick_str}/grid_summary_blackbody_thick_{thick_str}.csv"
-    else:  # template
-        grid_csv = f"dusty_runs/template_grids/silicate_tau_0.55um_thick_{thick_str}/grid_summary_nugent_iip_thick_{thick_str}.csv"
-
-    grid_csv = Path(grid_csv)
+    
     if not grid_csv.exists():
         raise FileNotFoundError(f"Grid CSV not found: {grid_csv}")
     

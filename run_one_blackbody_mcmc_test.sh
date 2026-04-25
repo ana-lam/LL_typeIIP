@@ -2,12 +2,14 @@
 set -u
 set -o pipefail
 
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
 oid="$1"
 logdir="$2"
 ncores="$3"
 
 # ---- cache (shared across both thickness runs) ----
-cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/dusty_npz_cache"
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
@@ -21,7 +23,7 @@ mkdir -p "$logdir" "$cachedir"
 # Loop over both thickness values
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
-  GRID_CSV="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
+  GRID_CSV="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
 
   # sanity check for this thickness's grid
   [ -f "$GRID_CSV" ] || { echo "!!! Missing blackbody grid CSV: $GRID_CSV"; exit 4; }

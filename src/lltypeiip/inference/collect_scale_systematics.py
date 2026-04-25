@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from lltypeiip.config import PROJECT_ROOT
+from lltypeiip.config import PROJECT_ROOT, get_fitted_csv_path
 
 # defaults
 DEFAULT_FITTED_GRID_DIR = PROJECT_ROOT / "fitted_grids"
@@ -39,8 +39,14 @@ def load_mcmc_summary(mcmc_summary_dir, mode, seed=None):
     return pd.read_csv(path)
 
 def load_fitted_grid_best(fitted_grid_dir, mode, thickness):
-    thick_str = str(thickness).replace(".", "_")
-    path = (Path(fitted_grid_dir) / mode / f"thick_{thick_str}"
+    
+    if fitted_grid_dir is None:
+        thick_str = str(thickness).replace(".", "_")
+        path = (Path(fitted_grid_dir) / mode / f"thick_{thick_str}"
+                / f"all_objects_{mode}_thick{thick_str}_fitted.csv")
+    else:
+        thick_str = str(thickness).replace(".", "_")
+        path = (Path(fitted_grid_dir) / mode / f"thick_{thick_str}"
             / f"all_objects_{mode}_thick{thick_str}_fitted.csv")
 
     if not path.exists():

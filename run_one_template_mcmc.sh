@@ -2,6 +2,8 @@
 set -u
 set -o pipefail
 
+PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
 oid="$1"
 logdir="$2"
 ncores="$3"
@@ -10,12 +12,12 @@ ncores="$3"
 SEED="${4:-99}"
 
 # ---- inputs ----
-TAIL_SED_DIR="/home/cal/analam/Documents/LL_typeIIP/data/tail_seds"
-TEMPLATE_PATH="/home/cal/analam/Documents/LL_typeIIP/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
+TAIL_SED_DIR="${PROJECT_ROOT}/data/tail_seds"
+TEMPLATE_PATH="${PROJECT_ROOT}/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
 TEMPLATE_TAG="nugent_iip"
 
 # ---- cache dir ----
-cachedir="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/dusty_npz_cache"
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
@@ -35,8 +37,9 @@ mkdir -p "$logdir" "$cachedir"
 # ---- sanity check all grids ----
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
-  fitted_csv="/home/cal/analam/Documents/LL_typeIIP/fitted_grids/template/thick_${thick_str}/all_objects_template_thick${thick_str}_fitted.csv"
-  grid_csv="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
+  fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
+  [ -f "$fitted_csv" ] || { echo "!!! Missing fitted grid CSV: $fitted_csv"; exit 4; }
+  grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
   [ -f "$grid_csv" ] || { echo "!!! Missing template grid CSV: $grid_csv"; exit 4; }
 done
 
@@ -44,7 +47,7 @@ done
 run_thick() {
   local thick="$1"
   local thick_str="${thick//./_}"
-  local grid_csv="/home/cal/analam/Documents/LL_typeIIP/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_${TEMPLATE_TAG}_thick_${thick_str}.csv"
+  local grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
   local workdir="/tmp/lltypeiip_dusty_work_template/${oid}_thick${thick_str}"
   local logfile="${logdir}/${oid}_thick${thick_str}.log"
 

@@ -71,6 +71,23 @@ def load_config(config_path=None, resolve_paths=True):
     return Config(config_dict)
 
 
+def get_grid_csv_path(mode: str, thickness: float):
+    """Return the path to a pre-computed DUSTY grid summary CSV."""
+    thick_str = str(thickness).replace(".", "_")
+    folder = "blackbody_grids" if mode == "blackbody" else "template_grids"
+    tag = "blackbody" if mode == "blackbody" else "nugent_iip"
+    subdir = f"silicate_tau_0.55um_thick_{thick_str}"
+    return PROJECT_ROOT / "dusty_runs" / folder / subdir / f"grid_summary_{tag}_thick_{thick_str}.csv"
+
+
+def get_fitted_csv_path(mode: str, thickness: float, adhoc_fix=None):
+    """Return the path to a combined fitted-grid summary CSV."""
+    thick_str = str(thickness).replace(".", "_")
+    suffix = f"_{adhoc_fix}" if adhoc_fix else ""
+    fname = f"all_objects_{mode}_thick{thick_str}_fitted{suffix}.csv"
+    return PROJECT_ROOT / "fitted_grids" / mode / f"thick_{thick_str}" / fname
+
+
 def setup_dustmaps(config_obj=None):
     import dustmaps.config
     from dustmaps.sfd import SFDQuery
@@ -118,4 +135,6 @@ __all__ = [
     'EXTINCTION_RV',
     'EXTINCTION_SF11_SCALE',
     'EXTINCTION_COEFFS',
+    'get_grid_csv_path',
+    'get_fitted_csv_path',
 ]
