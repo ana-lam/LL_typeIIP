@@ -18,7 +18,7 @@ echo "Total cores used  : $((NJOBS * NCORES_PER_THICK * 2))"
 echo "Logs in           : $LOGDIR"
 echo
 
-parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
+taskset -c 0-15 parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
   ./run_one_template_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0317 \
   :::: "$OIDS_FILE"
 

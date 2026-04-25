@@ -82,7 +82,7 @@ run_thick() {
       --workdir "$workdir" \
       --cache-dir "$cachedir" \
       --cache-ndigits 4 \
-      --cache-max 5000 \
+      --cache-max 100000 \
       --seed "$SEED"
 
     local ec=$?
