@@ -77,6 +77,8 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
         Path to saved fitted grid CSV
     """
 
+    thick_str = str(thickness).replace('.', '_')
+
     # load SED
     print(f"Loading SED for {oid}...")
     sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
@@ -103,9 +105,15 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     df_fitted['oid'] = oid
     df_fitted['mode'] = mode
 
-    if 'phase_days' in sed:
+    if mode == 'blackbody' and 'phase_days' in sed:
+        # blackbody models don't carry phase — set it from the SED
         df_fitted['phase_days'] = sed['phase_days']
+    # template: phase_days already varies per row from the grid; don't overwrite
     
+    # always record the observed SED phase for reference
+    if 'phase_days' in sed:
+        df_fitted['phase_days_obs'] = sed['phase_days']
+
     if 'mjd' in sed:
         df_fitted['mjd'] = sed['mjd']
 
@@ -140,7 +148,10 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # save fitted grid
-    output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+    if adhoc_fix is not None:
+        output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+    else:
+        output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
     output_path = output_dir / output_filename
     
     df_fitted.to_csv(output_path, index=False)
@@ -186,8 +197,11 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
     # save combined CSV
     thick_str = str(thickness).replace('.', '_')
     output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
-    combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
-    
+    if adhoc_fix is not None:
+        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix_str}.csv"
+    else:
+        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
+        
     df_combined.to_csv(combined_path, index=False)
     print(f"\nSaved combined summary: {combined_path}")
     print(f"Total objects: {len(oids)}")
@@ -206,7 +220,7 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
             print(f"  {row['oid']}: Tstar={row['tstar']:.0f}K, Tdust={row['tdust']:.0f}K, "
                   f"τ={row['tau']:.3f}, χ²_red={row['chi2_red']:.2f}")
         else:
-            print(f"  {row['oid']}: Tstar={row['tstar_dummy']:.0f}K, Tdust={row['tdust']:.0f}K, τ={row['tau']:.3f}, "
+            print(f"  {row['oid']}: phase={row['phase_days_obs']:.0f} d ({row['phase_days']:.0f} d) Tstar={row['tstar_dummy']:.0f}K, Tdust={row['tdust']:.0f}K, τ={row['tau']:.3f}, "
                   f"χ²_red={row['chi2_red']:.2f}")
     
     return combined_path

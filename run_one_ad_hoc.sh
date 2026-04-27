@@ -18,7 +18,7 @@ TEMPLATE_PATH="${PROJECT_ROOT}/data/typeiip_spectral_templates/sn2p_flux.v1.2.da
 TEMPLATE_TAG="nugent_iip"
 
 # ---- cache dir ----
-cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache_template"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)

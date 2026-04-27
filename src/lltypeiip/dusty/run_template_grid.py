@@ -156,7 +156,7 @@ def run_single_model(job):
 
 def main():
     default_dusty_file_dir = config.dusty.dusty_file_dir
-    default_cache_dir = config.dusty.npz_cache_dir
+    default_cache_dir = config.dusty.npz_cache_dir_template
 
     parser = argparse.ArgumentParser(
         description="Generate DUSTY template grid models for SEDs"
@@ -200,6 +200,8 @@ def main():
                         help="Dummy T* passed through API (template mode ignores it physically).")
     parser.add_argument("--thick_list", type=str, default="2.0",
                         help="Comma-separated shell thickness R_out/R_in values, e.g. '1.2,1.5,2,3,5'.")
+    parser.add_argument("--phase_offset_list", type=str, default=None,
+                        help="Comma-separated phase offsets in days to add to SED phases, e.g. '-20,-10,0,10,20'.")
     
     # Multiprocessing
     parser.add_argument("--n_workers", type=int, default=4)
@@ -290,7 +292,6 @@ def main():
         tdust_values = _parse_list(args.tdust_list)
     else:
         tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
-
     if args.tau_list:
         tau_values = _parse_list(args.tau_list)
     else:
@@ -299,6 +300,15 @@ def main():
         thick_values = _parse_list(args.thick_list)
     else:
         thick_values=[2.0]
+    if args.phase_offset_list: # apply phase offsets to SED inputs if provided
+        phase_offset_values = _parse_list(args.phase_offset_list)
+        sed_inputs = list(dict.fromkeys(
+                (oid, np.clip(phase + offset, 0.0, 411.0))
+                for oid, phase in sed_inputs
+                for offset in phase_offset_values
+            ))
+    else:
+        sed_inputs = sed_inputs  # no change
 
     # -----------------
     # Resolve workdir 

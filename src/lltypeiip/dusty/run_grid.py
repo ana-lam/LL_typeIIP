@@ -126,7 +126,7 @@ def main():
     # Use config from lltypeiip.config
     default_dusty_file_dir = config.dusty.dusty_file_dir
     default_workdir = config.dusty.workdir + "/blackbody_grids" # will actually define in command run
-    default_cache_dir = config.dusty.npz_cache_dir
+    default_cache_dir = config.dusty.npz_cache_dir_blackbody
     
     parser = argparse.ArgumentParser(
         description="Generate DUSTY grid models"

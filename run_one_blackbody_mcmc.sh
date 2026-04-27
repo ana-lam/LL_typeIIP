@@ -8,15 +8,26 @@ oid="$1"
 logdir="$2"
 ncores="$3"
 
-# ---- cache (shared across both thickness runs) ----
-cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
+# --- seed ---
+SEED="${4:-99}"
+
+# ---- inputs ----
+TAIL_SED_DIR="${PROJECT_ROOT}/data/tail_seds"
+
+# ---- cache dir ----
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache_blackbody"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
 
 # ---- MCMC parameters (PRODUCTION) ----
-NSTEPS=10000
-BURNIN=3000
+NSTEPS=7000
+BURNIN=1500
+
+sed_pkl="${TAIL_SED_DIR}/${oid}_tail_sed.pkl"
+
+# sanity checks
+[ -f "$sed_pkl" ] || { echo "!!! Missing SED pickle: $sed_pkl"; exit 2; }
 
 mkdir -p "$logdir" "$cachedir"
 
@@ -26,39 +37,19 @@ for thick in "${THICK_VALUES[@]}"; do
   fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
   [ -f "$fitted_csv" ] || { echo "!!! Missing fitted grid CSV: $fitted_csv"; exit 4; }
   grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
-  [ -f "$grid_csv" ] || { echo "!!! Missing template grid CSV: $grid_csv"; exit 4; }
+  [ -f "$grid_csv" ] || { echo "!!! Missing blackbody grid CSV: $grid_csv"; exit 4; }
 done
-
 
 # ---- function to run one thickness ----
 run_thick() {
   local thick="$1"
   local thick_str="${thick//./_}"
   local fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
-  local GRID_CSV="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
-  local workdir="/tmp/lltypeiip_dusty_work_blackbody/${oid}_thick${thick_str}"
-  local logfile="$logdir/${oid}_thick${thick_str}.log"
+  local grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
+  local workdir="${PROJECT_ROOT}/dusty_runs/mcmc_workdir/${oid}_thick${thick_str}"
+  local logfile="${logdir}/${oid}_thick${thick_str}.log"
 
-  [ -f "$GRID_CSV" ] || { echo "!!! Missing blackbody grid CSV: $GRID_CSV"; exit 4; }
   mkdir -p "$workdir"
-
-
-
-
-
-# Loop over both thickness values
-for thick in "${THICK_VALUES[@]}"; do
-  thick_str="${thick//./_}"
-  fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
-  GRID_CSV="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
-
-  # sanity check for this thickness's grid
-  [ -f "$GRID_CSV" ] || { echo "!!! Missing blackbody grid CSV: $GRID_CSV"; exit 4; }
-
-  workdir="/tmp/lltypeiip_dusty_work_blackbody/${oid}_thick${thick_str}"
-  mkdir -p "$workdir"
-
-  logfile="$logdir/${oid}_thick${thick_str}.log"
 
   {
     echo ">>> Starting BLACKBODY-MCMC PRODUCTION for $oid thick=$thick at $(date)"
@@ -66,12 +57,13 @@ for thick in "${THICK_VALUES[@]}"; do
     echo "workdir=$workdir"
     echo "cachedir=$cachedir"
     echo "sed_pkl=$sed_pkl"
-    echo "grid_csv=$GRID_CSV"
+    echo "grid_csv=$grid_csv"
     echo "fitted_grid_csv=$fitted_csv"
     echo "shell_thickness=$thick"
     echo
 
     stdbuf -oL -eL python -m lltypeiip.inference.run_sed_mcmc "$oid" \
+      --sed-pkl "$sed_pkl" \
       --fitted-grid-csv "$fitted_csv" \
       --grid-csv "$grid_csv" \
       --shell-thickness "$thick" \
@@ -90,11 +82,9 @@ for thick in "${THICK_VALUES[@]}"; do
 
     local ec=$?
     if [ "$ec" -eq 0 ]; then
-      echo
-      echo "<<< Finished BLACKBODY-MCMC PRODUCTION $oid thick=$thick at $(date)"
+      echo; echo "<<< Finished BLACKBODY-MCMC PRODUCTION $oid thick=$thick at $(date)"
     else
-      echo
-      echo "!!! FAILED BLACKBODY-MCMC PRODUCTION $oid thick=$thick exit=$ec at $(date)"
+      echo; echo "!!! FAILED BLACKBODY-MCMC PRODUCTION $oid thick=$thick exit=$ec at $(date)"
     fi
     exit "$ec"
   } > "$logfile" 2>&1
@@ -106,7 +96,6 @@ for thick in "${THICK_VALUES[@]}"; do
   run_thick "$thick" &
   pids+=($!)
 done
-
 
 overall=0
 for i in "${!pids[@]}"; do

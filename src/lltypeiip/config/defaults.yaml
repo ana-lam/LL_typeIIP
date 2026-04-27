@@ -51,7 +51,8 @@ dusty:
   workdir: "dusty_runs"
   workdir_mcmc_dir: "dusty_runs/mcmc_workdir"
   # NPZ caches for all DUSTY models
-  npz_cache_dir: "dusty_runs/dusty_npz_cache"
+  template_npz_cache_dir: "dusty_runs/dusty_npz_cache_template"
+  blackbody_npz_cache_dir: "dusty_runs/dusty_npz_cache_blackbody"
   grid_subdir: "silicate_tau_0.55um_thick_{thick_str}"
   grid_csv_name:
     blackbody: "grid_summary_blackbody_thick_{thick_str}.csv"

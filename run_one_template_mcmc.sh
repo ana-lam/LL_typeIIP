@@ -17,7 +17,7 @@ TEMPLATE_PATH="${PROJECT_ROOT}/data/typeiip_spectral_templates/sn2p_flux.v1.2.da
 TEMPLATE_TAG="nugent_iip"
 
 # ---- cache dir ----
-cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
+cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache_template"
 
 # ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
@@ -37,9 +37,9 @@ mkdir -p "$logdir" "$cachedir"
 # ---- sanity check all grids ----
 for thick in "${THICK_VALUES[@]}"; do
   thick_str="${thick//./_}"
-  fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
+  fitted_csv="${PROJECT_ROOT}/fitted_grids/template/thick_${thick_str}/all_objects_template_thick${thick_str}_fitted.csv"
   [ -f "$fitted_csv" ] || { echo "!!! Missing fitted grid CSV: $fitted_csv"; exit 4; }
-  grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
+  grid_csv="${PROJECT_ROOT}/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_nugent_iip_thick_${thick_str}.csv"
   [ -f "$grid_csv" ] || { echo "!!! Missing template grid CSV: $grid_csv"; exit 4; }
 done
 
@@ -47,9 +47,9 @@ done
 run_thick() {
   local thick="$1"
   local thick_str="${thick//./_}"
-  local fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
-  local grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
-  local workdir="/tmp/lltypeiip_dusty_work_template/${oid}_thick${thick_str}"
+  local fitted_csv="${PROJECT_ROOT}/fitted_grids/template/thick_${thick_str}/all_objects_template_thick${thick_str}_fitted.csv"
+  local grid_csv="${PROJECT_ROOT}/dusty_runs/template_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_nugent_iip_thick_${thick_str}.csv"
+  local workdir="${PROJECT_ROOT}/dusty_runs/mcmc_workdir/${oid}_thick${thick_str}"
   local logfile="${logdir}/${oid}_thick${thick_str}.log"
 
   mkdir -p "$workdir"
@@ -84,8 +84,7 @@ run_thick() {
       --cache-dir "$cachedir" \
       --cache-ndigits 4 \
       --cache-max 100000 \
-      --seed "$SEED" \
-      --no-tmp
+      --seed "$SEED"
 
     local ec=$?
     if [ "$ec" -eq 0 ]; then

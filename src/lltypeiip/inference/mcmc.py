@@ -278,8 +278,10 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
 
     sed = _unwrap_sed(sed)
 
-    if cache_dir is None:
-        cache_dir = str(Path(workdir) / "dusty_npz_cache")
+    if cache_dir is None and template_path is not None:
+        cache_dir = str(Path(workdir) / "dusty_npz_cache_template")
+    elif cache_dir is None:
+        cache_dir = str(Path(workdir) / "dusty_npz_cache_blackbody")
 
     template = None
     template_mode = (template_path is not None)

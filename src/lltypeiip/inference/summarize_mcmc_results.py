@@ -33,7 +33,8 @@ DEFAULT_MCMC_DIR = PROJECT_ROOT / "mcmc_results"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "mcmc_results/summaries"
 DEFAULT_SED_DIR = PROJECT_ROOT / "data/tail_seds"
 DEFAULT_WORKDIR = Path("/tmp/lltypeiip_mcmc_summary")
-DEFAULT_DUSTY_CACHE_DIR = PROJECT_ROOT / config.dusty.npz_cache_dir
+DEFAULT_DUSTY_CACHE_DIR_TEMPLATE = PROJECT_ROOT / config.dusty.npz_cache_dir_template
+DEFAULT_DUSTY_CACHE_DIR_BLACKBODY = PROJECT_ROOT / config.dusty.npz_cache_dir_blackbody
 
 TEMPLATE_PATH = PROJECT_ROOT /  "data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
 TEMPLATE_TAG = "nugent_iip"
@@ -87,7 +88,7 @@ def _compute_chi2_mcmc(lam_um, lamFlam, sed, log10_a, y_mode="Flam"):
 
 def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR, 
                           out_dir=DEFAULT_OUTPUT_DIR, sed_dir=DEFAULT_SED_DIR, 
-                          workdir=DEFAULT_WORKDIR, cache_dir=DEFAULT_DUSTY_CACHE_DIR,
+                          workdir=DEFAULT_WORKDIR, cache_dir=DEFAULT_DUSTY_CACHE_DIR_BLACKBODY,
                           mcmc_mode="mixture", seed=None, y_mode="Flam", adhoc_fix=None):
     """
     Summarize MCMC results for a single object, mode, and thickness. 
@@ -298,7 +299,7 @@ def main():
     parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--sed-dir", default=str(DEFAULT_SED_DIR))
     parser.add_argument("--workdir", default=str(DEFAULT_WORKDIR))
-    parser.add_argument("--cache-dir", default=str(DEFAULT_DUSTY_CACHE_DIR))
+    parser.add_argument("--cache-dir", default=str(DEFAULT_DUSTY_CACHE_DIR_BLACKBODY))
 
     args = parser.parse_args()
 
@@ -334,7 +335,7 @@ def main():
                     oid=oid, mode=mode, thickness=thickness,
                     mcmc_dir=mcmc_dir, out_dir=out_dir,
                     sed_dir=sed_dir, workdir=workdir,
-                    cache_dir=cache_dir,
+                    cache_dir=DEFAULT_DUSTY_CACHE_DIR_TEMPLATE if mode == "template" else DEFAULT_DUSTY_CACHE_DIR_BLACKBODY,
                     mcmc_mode=args.mcmc_mode,
                     seed=args.seed,
                     adhoc_fix=args.adhoc_fix,
