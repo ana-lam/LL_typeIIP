@@ -4,7 +4,7 @@ set -euo pipefail
 OIDS_FILE="sed_sample.txt"
 LOGDIR="mcmc_logs_template"
 
-NJOBS=5
+NJOBS=4
 NCORES_PER_THICK=2
 
 mkdir -p "$LOGDIR"
@@ -19,7 +19,7 @@ echo "Logs in           : $LOGDIR"
 echo
 
 taskset -c 0-15 parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
-  ./run_one_template_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0317 \
+  ./run_one_template_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0426 \
   :::: "$OIDS_FILE"
 
 echo

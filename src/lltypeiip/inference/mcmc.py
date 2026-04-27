@@ -373,7 +373,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             nwalkers, ndim, log_probability,
             args=(sed, dusty_runner, prior_config, y_mode, use_weights,
                   template, template_tag, tstar_dummy, shell_thickness),
-            moves=emcee.moves.StretchMove(a=3.0),
+            moves=emcee.moves.StretchMove(a=2.0),
             pool=pool
         )
         print(f"Running MCMC: ndim={ndim}, nwalkers={nwalkers}, nsteps={nsteps}...", flush=True)

@@ -23,8 +23,8 @@ cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
 THICK_VALUES=(2.0 5.0)
 
 # ---- MCMC parameters (PRODUCTION) ----
-NSTEPS=15000
-BURNIN=3000
+NSTEPS=7000
+BURNIN=1500
 
 sed_pkl="${TAIL_SED_DIR}/${oid}_tail_sed.pkl"
 
@@ -47,6 +47,7 @@ done
 run_thick() {
   local thick="$1"
   local thick_str="${thick//./_}"
+  local fitted_csv="${PROJECT_ROOT}/fitted_grids/blackbody/thick_${thick_str}/all_objects_blackbody_thick${thick_str}_fitted.csv"
   local grid_csv="${PROJECT_ROOT}/dusty_runs/blackbody_grids/silicate_tau_0.55um_thick_${thick_str}/grid_summary_blackbody_thick_${thick_str}.csv"
   local workdir="/tmp/lltypeiip_dusty_work_template/${oid}_thick${thick_str}"
   local logfile="${logdir}/${oid}_thick${thick_str}.log"
@@ -83,7 +84,8 @@ run_thick() {
       --cache-dir "$cachedir" \
       --cache-ndigits 4 \
       --cache-max 100000 \
-      --seed "$SEED"
+      --seed "$SEED" \
+      --no-tmp
 
     local ec=$?
     if [ "$ec" -eq 0 ]; then

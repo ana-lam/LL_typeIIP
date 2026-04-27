@@ -7,13 +7,23 @@ PROJECT_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 oid="$1"
 logdir="$2"
 ncores="$3"
+
+# --- seed ---
 SEED="${4:-99}"
 
+
+# ---- inputs ----
 TAIL_SED_DIR="${PROJECT_ROOT}/data/tail_seds"
 TEMPLATE_PATH="${PROJECT_ROOT}/data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
 TEMPLATE_TAG="nugent_iip"
+
+# ---- cache dir ----
 cachedir="${PROJECT_ROOT}/dusty_runs/dusty_npz_cache"
+
+# ---- shell thickness values ----
 THICK_VALUES=(2.0 5.0)
+
+# ---- MCMC parameters (PRODUCTION) ----
 NSTEPS=15000
 BURNIN=3000
 
