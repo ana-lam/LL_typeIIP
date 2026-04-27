@@ -86,9 +86,9 @@ class DustyRunner:
             if phase_days is None:
                 return (tstar_i, tdust_i, tau_f, thick_f)
             
-            phase_f = round(float(phase_days), 2)
+            phase_f = int(round(float(phase_days)))
             tag = str(template_tag) if template_tag is not None else "tmpl"
-            
+
             return (tstar_i, tdust_i, tau_f, thick_f, phase_f, tag)
 
     @staticmethod

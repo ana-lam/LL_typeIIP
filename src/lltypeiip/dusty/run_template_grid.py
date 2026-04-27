@@ -51,13 +51,13 @@ def make_leaf_and_key(tstar, tdust, tau, thick, phase, template_tag, ndigits=4):
     tdust_i = int(round(float(tdust)))
     tau_f = round(float(tau), ndigits)
     thick_f = round(float(thick), ndigits)
-    phase_f = round(float(phase), 2)
+    phase_f = int(round(float(phase)))
     tag = str(template_tag)
-    
+
     leaf = (f"Tstar_{tstar_i}_Tdust_{tdust_i}_"
             f"tau_{tau_f:.{ndigits}g}_thick_{thick_f:.{ndigits}g}_"
-            f"{tag}_phase_{phase_f:.2f}").replace('.', '_')
-    
+            f"{tag}_phase_{phase_f}").replace('.', '_')
+
     key = (tstar_i, tdust_i, tau_f, thick_f, phase_f, tag)
     
     return leaf, key
