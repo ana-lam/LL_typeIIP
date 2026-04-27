@@ -19,8 +19,6 @@ from alerce.core import Alerce
 
 default_workdir = config.dusty.workdir_mcmc_dir
 default_outdir  = getattr(config.paths, "mcmc_results_dir", str(PROJECT_ROOT / "mcmc_results"))
-default_cache_dir_template = config.dusty.npz_cache_dir_template
-default_cache_dir_blackbody = config.dusty.npz_cache_dir_blackbody 
 
 def parse_args():
 
@@ -68,7 +66,7 @@ def parse_args():
     p.add_argument("--mp", choices=["spawn", "fork"], default="spawn")
 
     # cache
-    p.add_argument("--cache-dir", type=str, default=default_cache_dir_blackbody,
+    p.add_argument("--cache-dir", type=str, default=None,
                help="On-disk cache for DUSTY results (npz). Default: <workdir>/dusty_npz_cache")
     p.add_argument("--cache-ndigits", type=int, default=4,
                 help="Rounding digits used for tau/thickness cache keys.")
@@ -89,6 +87,12 @@ def main():
     oid = args.oid
 
     template_mode = (args.template_path is not None)
+
+    if args.cache_dir is None:
+    if template_mode:
+        args.cache_dir = str(config.dusty.template_npz_cache_dir)
+    else:
+        args.cache_dir = str(config.dusty.blackbody_npz_cache_dir)
 
     print(f"Running MCMC for OID: {oid}")
     print(f"Posterior mode: {args.mode}")

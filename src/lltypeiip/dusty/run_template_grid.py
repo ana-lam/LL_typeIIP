@@ -156,7 +156,7 @@ def run_single_model(job):
 
 def main():
     default_dusty_file_dir = config.dusty.dusty_file_dir
-    default_cache_dir = config.dusty.npz_cache_dir_template
+    default_cache_dir = config.dusty.template_npz_cache_dir
 
     parser = argparse.ArgumentParser(
         description="Generate DUSTY template grid models for SEDs"

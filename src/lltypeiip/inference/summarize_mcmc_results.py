@@ -33,8 +33,8 @@ DEFAULT_MCMC_DIR = PROJECT_ROOT / "mcmc_results"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "mcmc_results/summaries"
 DEFAULT_SED_DIR = PROJECT_ROOT / "data/tail_seds"
 DEFAULT_WORKDIR = Path("/tmp/lltypeiip_mcmc_summary")
-DEFAULT_DUSTY_CACHE_DIR_TEMPLATE = PROJECT_ROOT / config.dusty.npz_cache_dir_template
-DEFAULT_DUSTY_CACHE_DIR_BLACKBODY = PROJECT_ROOT / config.dusty.npz_cache_dir_blackbody
+DEFAULT_DUSTY_CACHE_DIR_TEMPLATE = PROJECT_ROOT / config.dusty.template_npz_cache_dir
+DEFAULT_DUSTY_CACHE_DIR_BLACKBODY = PROJECT_ROOT / config.dusty.blackbody_npz_cache_dir
 
 TEMPLATE_PATH = PROJECT_ROOT /  "data/typeiip_spectral_templates/sn2p_flux.v1.2.dat"
 TEMPLATE_TAG = "nugent_iip"
@@ -299,7 +299,7 @@ def main():
     parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--sed-dir", default=str(DEFAULT_SED_DIR))
     parser.add_argument("--workdir", default=str(DEFAULT_WORKDIR))
-    parser.add_argument("--cache-dir", default=str(DEFAULT_DUSTY_CACHE_DIR_BLACKBODY))
+    parser.add_argument("--cache-dir", default=None)
 
     args = parser.parse_args()
 
@@ -307,7 +307,6 @@ def main():
     out_dir = Path(args.out_dir)
     sed_dir = Path(args.sed_dir)
     workdir = Path(args.workdir)
-    cache_dir = Path(args.cache_dir)
 
     thicknesses = [2.0, 5.0] if args.thickness == "both" else [float(args.thickness)]
     modes = ["blackbody", "template"] if args.mode == "both" else [args.mode]
@@ -329,13 +328,15 @@ def main():
         print(f"\n{'='*60}")
         print(f"OID: {oid}")
         for mode in modes:
+            if args.cache_dir is None: 
+                cache_dir = DEFAULT_DUSTY_CACHE_DIR_TEMPLATE if mode == "template" else DEFAULT_DUSTY_CACHE_DIR_BLACKBODY
             for thickness in thicknesses:
                 print(f"  {mode} thick={thickness}")
                 row = summarize_mcmc_results(
                     oid=oid, mode=mode, thickness=thickness,
                     mcmc_dir=mcmc_dir, out_dir=out_dir,
                     sed_dir=sed_dir, workdir=workdir,
-                    cache_dir=DEFAULT_DUSTY_CACHE_DIR_TEMPLATE if mode == "template" else DEFAULT_DUSTY_CACHE_DIR_BLACKBODY,
+                    cache_dir=cache_dir,
                     mcmc_mode=args.mcmc_mode,
                     seed=args.seed,
                     adhoc_fix=args.adhoc_fix,
