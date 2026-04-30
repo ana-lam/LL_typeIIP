@@ -52,15 +52,18 @@ dusty:
   workdir_mcmc_dir: "dusty_runs/mcmc_workdir"
   # NPZ caches for all DUSTY models
   template_npz_cache_dir: "dusty_runs/dusty_npz_cache_template"
+  template_appended_npz_cache_dir: "dusty_runs/dusty_npz_cache_template_appended"
   blackbody_npz_cache_dir: "dusty_runs/dusty_npz_cache_blackbody"
   grid_subdir: "silicate_tau_0.55um_thick_{thick_str}"
   grid_csv_name:
     blackbody: "grid_summary_blackbody_thick_{thick_str}.csv"
     template: "grid_summary_nugent_iip_thick_{thick_str}.csv"
+    template_appended: "grid_summary_nugent_iip_appended_thick_{thick_str}.csv"
   fitted_grids_dir: "fitted_grids"
   fitted_csv_name:
     blackbody: "all_objects_blackbody_thick{thick_str}_fitted.csv"
     template: "all_objects_template_thick{thick_str}_fitted.csv"
+    template_appended: "all_objects_template_appended_thick{thick_str}_fitted.csv"
 
 
 paths:

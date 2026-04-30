@@ -13,7 +13,11 @@ from ..sed.build import _prepare_sed_xy, _unwrap_sed
 from .priors import log_prior
 
 def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
-    """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2."""
+    """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2.
+
+    - If a is None, compute the analytic best-fit scale using detections only.
+    - If a is provided from theta (MCMC), use it directly to compute chi2.
+    """
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
     is_ul = np.array(sed.get("is_ul", np.zeros(len(x_sed), dtype=bool)))
 

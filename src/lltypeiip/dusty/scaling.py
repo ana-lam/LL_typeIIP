@@ -185,8 +185,14 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
         if oid is None:
             raise ValueError("SED dictionary must contain 'oid' key for template grid fitting")
         
-        if template_tag is None and 'nugent' in grid_csv.name:
-            template_tag = "nugent_iip"
+        if template_tag is None:
+            # infer tag from the CSV rather than hardcoding
+            import pandas as _pd
+            _df_peek = _pd.read_csv(grid_csv, nrows=1)
+            if 'template_tag' in _df_peek.columns:
+                template_tag = str(_df_peek['template_tag'].iloc[0])
+            elif 'nugent' in grid_csv.name:
+                template_tag = "nugent_iip"
 
         models = load_dusty_grid(
             csv_path=grid_csv,
@@ -256,47 +262,113 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
     
     # create DataFrame and sort by chi2_red
     df = pd.DataFrame(rows).sort_values("chi2_red").reset_index(drop=True)
-    df._models = model_map
+    
+    df.attrs["models"] = model_map
 
     best_model_folder = df.iloc[0]['folder']
-    best_model = df._models[best_model_folder]
-    sed_residuals(best_model, sed, y_mode="Flam")
+    best_model = df.attrs["models"][best_model_folder]
+    df_resid = sed_residuals(best_model, sed, y_mode=y_mode, print_table=True)
+    df.attrs["best_model_residuals"] = df_resid
 
     return df
 
-def sed_residuals(model, sed, y_mode="Flam"):
-    """Compute per-band residuals for a fitted model."""
+def sed_residuals(model, sed, y_mode="Flam", print_table=True):
+    """Compute per-band residuals for a fitted model and return a DataFrame."""
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
-    is_ul = np.array(sed.get("is_ul", [False]*len(sed["bands"])), dtype=bool)
+    is_ul = np.array(sed.get("is_ul", [False] * len(sed["bands"])), dtype=bool)
     bands = np.array(sed["bands"])
 
-    if y_mode == "Flam":
+    if y_mode in ["Flam", "Fnu"]:
         x_mod = model.x_plot
         y_mod = model.y_scaled
-    elif y_mode == "Fnu":
-        x_mod = model.x_plot
-        y_mod = model.y_scaled
+    else:
+        raise ValueError("y_mode must be 'Flam' or 'Fnu'")
 
     y_mod_interp = np.interp(x_sed, x_mod, y_mod)
 
-    print(f"\nPer-band residuals for {model.folder}:")
-    print(f"{'Band':<10} {'Obs':>12} {'Model':>12} {'Err':>12} {'Residual':>12} {'chi2':>10} {'UL':>5}")
-    print("-" * 75)
-    
-    chi2_total = 0
-    for i, (b, x, yo, ym, e, ul) in enumerate(zip(bands, x_sed, y_sed, y_mod_interp, ey_sed, is_ul)):
+    rows = []
+    chi2_total = 0.0
+
+    for b, x, yo, ym, e, ul in zip(
+        bands, x_sed, y_sed, y_mod_interp, ey_sed, is_ul
+    ):
         if ul:
             sigma = yo / 3.0
             excess = ym - yo
-            chi2_i = (excess / sigma)**2 if excess > 0 else 0.0
-            print(f"{b:<10} {yo:>12.4e} {ym:>12.4e} {'UL':>12} {excess:>+12.4e} {chi2_i:>10.3f}  yes")
+
+            if excess > 0:
+                residual_sigma = excess / sigma
+                chi2_i = residual_sigma**2
+            else:
+                residual_sigma = 0.0
+                chi2_i = 0.0
+
+            err_used = sigma
+            residual = yo - ym
+
         else:
-            resid = (yo - ym) / e
-            chi2_i = resid**2
-            print(f"{b:<10} {yo:>12.4e} {ym:>12.4e} {e:>12.4e} {resid:>+12.4f} {chi2_i:>10.3f}   no")
+            err_used = e
+            residual = yo - ym
+            residual_sigma = residual / e
+            chi2_i = residual_sigma**2
+
         chi2_total += chi2_i
-    
-    print(f"\nTotal chi2={chi2_total:.3f}, dof={model.dof}, chi2_red={chi2_total/model.dof:.3f}")
+
+        rows.append(
+            {
+                "band": b,
+                "x": x,
+                "y_obs": yo,
+                "y_model": ym,
+                "y_err": e,
+                "err_used": err_used,
+                "residual": residual,
+                "residual_sigma": residual_sigma,
+                "chi2_band": chi2_i,
+                "is_ul": bool(ul),
+                "model_folder": str(model.folder),
+                "scale": getattr(model, "scale", np.nan),
+                "chi2_total_model": getattr(model, "chi2", np.nan),
+                "dof_model": getattr(model, "dof", np.nan),
+                "chi2_red_model": getattr(model, "chi2_red", np.nan),
+            }
+        )
+
+    df_resid = pd.DataFrame(rows)
+
+    if print_table:
+        print(f"\nPer-band residuals for {model.folder}:")
+        print(
+            f"{'Band':<10} {'Obs':>12} {'Model':>12} "
+            f"{'Err':>12} {'Residual':>12} {'chi2':>10} {'UL':>5}"
+        )
+        print("-" * 75)
+
+        for _, row in df_resid.iterrows():
+            if row["is_ul"]:
+                print(
+                    f"{row['band']:<10} "
+                    f"{row['y_obs']:>12.4e} "
+                    f"{row['y_model']:>12.4e} "
+                    f"{'UL':>12} "
+                    f"{row['residual']:>+12.4e} "
+                    f"{row['chi2_band']:>10.3f}  yes"
+                )
+            else:
+                print(
+                    f"{row['band']:<10} "
+                    f"{row['y_obs']:>12.4e} "
+                    f"{row['y_model']:>12.4e} "
+                    f"{row['y_err']:>12.4e} "
+                    f"{row['residual_sigma']:>+12.4f} "
+                    f"{row['chi2_band']:>10.3f}   no"
+                )
+
+        dof = getattr(model, "dof", 0)
+        chi2_red = chi2_total / dof if dof > 0 else np.inf
+        print(f"\nTotal chi2={chi2_total:.3f}, dof={dof}, chi2_red={chi2_red:.3f}")
+
+    return df_resid
 
 # def fit_blackbody_grid_to_sed(grid_csv, sed, y_mode="Flam", use_weights=True):
 #     """

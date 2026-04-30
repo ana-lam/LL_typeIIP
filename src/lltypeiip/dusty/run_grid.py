@@ -89,7 +89,7 @@ def run_single_model(job):
         return dict(tstar=tstarval, tdust=tdustval, tau=tauval, 
                     shell_thickness=shell_thick_val,
                     outpath=None, npz_path=str(npz_path) if npz_path else None,
-                    r1=np.nan, ierror=1, error="DUSTY failed", cached=False)
+                    r1=np.nan, ierror=1, error="DUSTY failed", cached=False, template_path=None)
 
     # Optionally save sed.dat
     outpath=None
@@ -118,7 +118,8 @@ def run_single_model(job):
         r1=r1,
         ierror=0,
         error=None,
-        cached=False
+        cached=False,
+        template_path=None
     )
 
 def main():

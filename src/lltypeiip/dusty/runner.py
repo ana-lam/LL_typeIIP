@@ -200,13 +200,16 @@ class DustyRunner:
 
     
     def evaluate_model(self, tstar, tdust, tau, shell_thickness=None,
-                       template=None, phase_days=None, template_tag="nugent_iip"):
+                       template=None, phase_days=None, template_tag="nugent_iip",
+                       detailed=False):
         """
         Run DUSTY (or load from cache/disk) and return (lam_um, lamFlam, r1).
 
         If template and phase_days are provided, use DustyCustomInputSpectrum with Spectrum=5.
 
         theta: (tstar, tdust, tau[, shell_thickness])
+
+        detailed: if True, components returned fTot, xAtt, xDs, xDe, fInp, tauT, albedo  
         """
         if shell_thickness is None:
             shell_thickness = self.shell_thickness_fixed
@@ -222,7 +225,7 @@ class DustyRunner:
         # check in-memory cache
         hit = self._cache_get(ckey)
         if hit is not None:
-            return hit
+            return hit if detailed else (hit[0], hit[1], hit[2])
 
         # check disk cache
         dpath = self._disk_cache_path(ckey)
@@ -231,10 +234,26 @@ class DustyRunner:
                 z = np.load(dpath, allow_pickle=False)
                 lam_um = z["lam_um"]
                 lamFlam = z["lamFlam"]
-                r1 = float(z["r1"])
-                out = (lam_um, lamFlam, r1)
+                r1 = float(z["r1"][0])
+
+                components = None
+                if all(k in z for k in ("xAtt", "xDs", "xDe", "fInp", "tauT", "albedo")):
+                    components = {
+                        "fTot":   lamFlam,
+                        "xAtt":   z["xAtt"],
+                        "xDs":    z["xDs"],
+                        "xDe":    z["xDe"],
+                        "fInp":   z["fInp"],
+                        "tauT":   z["tauT"],
+                        "albedo": z["albedo"],
+                    }
+                
+                out = (lam_um, lamFlam, r1, components)
+
                 self._cache_set(ckey, out)
-                return out
+                
+                return out if detailed else (lam_um, lamFlam, r1)
+
             except Exception:
                 # corrupted cache file -> remove
                 try:
@@ -281,12 +300,19 @@ class DustyRunner:
                 
                 runner.generate_input()
                 runner.run()
-                lam, flx, npt, r1, ierror = runner.get_results()
+                result = runner.get_results(detailed=detailed)
+                components = None
+                if detailed:
+                    lam, flx, npt, r1, ierror, components = result
+                else:
+                    lam, flx, npt, r1, ierror = result
+
 
         except Exception as e:
             if self.logger:
                 self.logger.error(f"Error running DUSTY in {run_dir}: {e}")
-            return (None, None, None)
+            out = (None, None, None, None)
+            return out if detailed else (None, None, None)
 
         finally:
             os.chdir(prev_cwd)
@@ -296,16 +322,16 @@ class DustyRunner:
         if ierror != 0:
             if self.logger:
                 self.logger.warning(f"DUSTY ierror={ierror} for {ckey}")
-            out = (None, None, None)
+            out = (None, None, None, None)
             self._cache_set(ckey, out)
-            return out
+            return out if detailed else (None, None, None)
 
         lam_um = np.asarray(lam, float)
         lamFlam = np.asarray(flx, float)
         r1 = float(r1)
 
-        out = (lam_um, lamFlam, r1)
-
+        out = (lam_um, lamFlam, r1, components) # components may be None if not detailed
+         
         # save disk cache (optional)
         if dpath is not None:
             try:
@@ -316,7 +342,18 @@ class DustyRunner:
                     prefix='.tmp_',
                     suffix='.npz'
                 ) as tmp_file:
-                    np.savez_compressed(tmp_file, lam_um=lam_um, lamFlam=lamFlam, r1=r1)
+                    save_kwargs = dict(lam_um=lam_um, lamFlam=lamFlam, r1=np.array([r1]))
+                    if components is not None:
+                        save_kwargs.update(xAtt=components['xAtt'],
+                            xDs=components['xDs'],
+                            xDe=components['xDe'],
+                            fInp=components['fInp'],
+                            tauT=components['tauT'],
+                            albedo=components['albedo'])
+                    np.savez_compressed(
+                        tmp_file,
+                        **save_kwargs
+                    )
                     tmp_path = tmp_file.name
 
                 os.replace(tmp_path, str(dpath))
@@ -335,4 +372,4 @@ class DustyRunner:
                 
         self._cache_set(ckey, out)
         
-        return out
+        return out if detailed else (lam_um, lamFlam, r1)

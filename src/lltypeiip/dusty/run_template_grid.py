@@ -105,7 +105,7 @@ def run_single_model(job):
     )
     
     # Run DUSTY model
-    lam_um, lamFlam, r1 = runner.evaluate_model(
+    lam_um, lamFlam, r1, components = runner.evaluate_model(
         tstar=float(tstarval),
         tdust=float(tdustval),
         tau=float(tauval),
@@ -113,6 +113,7 @@ def run_single_model(job):
         template=template,
         phase_days=float(phase_days),
         template_tag=str(template_tag),
+        detailed=True
     )
 
     ckey = runner._canonical_key(
@@ -135,7 +136,8 @@ def run_single_model(job):
             npz_path=str(npz_path) if npz_path else None,
             ierror=1,
             error="DUSTY failed",
-            cached=False
+            cached=False,
+            template_path=str(template_path)
         )
 
     return dict(
@@ -150,7 +152,8 @@ def run_single_model(job):
         npz_path=str(npz_path) if npz_path else None,
         ierror=0,
         error=None,
-        cached=False
+        cached=False,
+        template_path=str(template_path)
     )
 
 
@@ -284,7 +287,7 @@ def main():
         raise RuntimeError("No SEDs loaded.")
 
     logger.info(f"Loaded {len(sed_inputs)} SED(s)")
-
+    
     # --------------
     # Build grids 
     # --------------

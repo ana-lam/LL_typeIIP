@@ -54,7 +54,8 @@ def load_sed(oid, sed_dir="data/tail_seds", adhoc_fix=None):
     return sed
 
 def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
-                               output_dir="fitted_grids", max_tstar=6000.0, adhoc_fix=None):
+                               output_dir="fitted_grids", max_tstar=6000.0, adhoc_fix=None,
+                               grid_csv=None):
     """
     Fit grid to SED and save summary CSV.
 
@@ -78,19 +79,29 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     """
 
     thick_str = str(thickness).replace('.', '_')
+    output_root = Path(output_dir)
 
     # load SED
     print(f"Loading SED for {oid}...")
     sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
 
     # construct grid CSV path
-    grid_csv = get_grid_csv_path(mode, thickness)
+    if grid_csv is None:
+        grid_csv = get_grid_csv_path(mode, thickness)
+    grid_csv = Path(grid_csv)
 
-    
     if not grid_csv.exists():
         raise FileNotFoundError(f"Grid CSV not found: {grid_csv}")
     
     print(f"Fitting {mode} grid (thickness={thickness}) to {oid}...")
+
+    # grab template_path
+    grid_df_raw = pd.read_csv(grid_csv)
+    template_path_val = None
+    if 'template_path' in grid_df_raw.columns:
+        vals = grid_df_raw['template_path'].dropna().unique()
+        if len(vals) > 0:
+            template_path_val = str(vals[0])
 
     # Fit grid to SED
     df_fitted = fit_grid_to_sed(
@@ -104,6 +115,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
 
     df_fitted['oid'] = oid
     df_fitted['mode'] = mode
+    df_fitted['template_path'] = template_path_val
 
     if mode == 'blackbody' and 'phase_days' in sed:
         # blackbody models don't carry phase — set it from the SED
@@ -129,6 +141,8 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
         param_cols = ['tdust', 'tau']
         if 'template_tag' in df_fitted.columns:
             first_cols.append('template_tag')
+        if 'template_path' in df_fitted.columns:
+            first_cols.append('template_path')
 
     fit_cols = ['scale', 'chi2', 'dof', 'chi2_red']
 
@@ -144,8 +158,50 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     df_fitted = df_fitted[first_cols + param_cols + fit_cols + path_cols + other_cols]
 
     # create output directory
-    output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
+    if "appended" in grid_csv.stem:
+        output_dir = Path(output_dir) / "template_appended" / f"thick_{thick_str}"
+    else:
+        output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # save residuals
+    resid_df = df_fitted.attrs.get("best_model_residuals", None)
+    
+    if resid_df is not None:
+        if "appended" in grid_csv.stem:
+            resid_mode_dir = output_root / "template_appended"
+        else:
+            resid_mode_dir = output_root / mode
+
+        resid_oid_dir = resid_mode_dir / oid
+        resid_oid_dir.mkdir(parents=True, exist_ok=True)
+        resid_path = resid_oid_dir / "best_grid_fit_per_band_residuals.csv"
+
+        best = df_fitted.iloc[0]
+
+        resid_df = resid_df.copy()
+        resid_df.insert(0, "oid", oid)
+        resid_df.insert(1, "mode", mode)
+        resid_df.insert(2, "shell_thickness", thickness)
+
+        if "phase_days_obs" in df_fitted.columns:
+            resid_df["phase_days_obs"] = best["phase_days_obs"]
+        if "phase_days" in df_fitted.columns:
+            resid_df["phase_days_model"] = best["phase_days"]
+        if "tdust" in df_fitted.columns:
+            resid_df["tdust"] = best["tdust"]
+        if "tau" in df_fitted.columns:
+            resid_df["tau"] = best["tau"]
+        if "tstar" in df_fitted.columns:
+            resid_df["tstar"] = best["tstar"]
+        if "tstar_dummy" in df_fitted.columns:
+            resid_df["tstar_dummy"] = best["tstar_dummy"]
+        if "template_tag" in df_fitted.columns:
+            resid_df["template_tag"] = best["template_tag"]
+
+        resid_df.to_csv(resid_path, index=False)
+        print(f"Saved per-band residuals: {resid_path}")
+
     
     # save fitted grid
     if adhoc_fix is not None:
@@ -165,7 +221,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     return output_path
 
-def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", adhoc_fix=None):
+def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", adhoc_fix=None, grid_csv=None):
     """
     Create combined summary CSV for multiple OIDs.
     """
@@ -176,7 +232,7 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
         try:
             # create individual fitted grid
             output_path = create_fitted_grid_summary(
-                oid, mode, thickness, sed_dir, output_dir, adhoc_fix
+                oid, mode, thickness, sed_dir, output_dir, adhoc_fix=adhoc_fix, grid_csv=grid_csv
             )
             
             # load the fitted results
@@ -196,9 +252,12 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
     
     # save combined CSV
     thick_str = str(thickness).replace('.', '_')
-    output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
+    if "appended" in grid_csv:
+        output_dir = Path(output_dir) / "template_appended" / f"thick_{thick_str}"
+    else:
+        output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
     if adhoc_fix is not None:
-        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix_str}.csv"
+        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
     else:
         combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
         
@@ -243,6 +302,9 @@ def main():
                        help="Directory to save fitted grid summaries")
     parser.add_argument("--adhoc-fix", default=None,
                        help="Ad-hoc fix tag for SED filename (e.g., 'no_i_band')")
+    parser.add_argument("--grid-csv", default=None,
+                       help="Override grid CSV path (e.g. for appended template). "
+                            "Default: determined from mode and thickness via config.")
     
     args = parser.parse_args()
 
@@ -280,14 +342,16 @@ def main():
             if len(oids) == 1:
                 # Single object
                 create_fitted_grid_summary(
-                    oids[0], mode, thickness, 
-                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix
+                    oids[0], mode, thickness,
+                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
+                    grid_csv=args.grid_csv
                 )
             else:
                 # create combined summary
                 create_combined_summary(
                     oids, mode, thickness,
-                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix
+                    args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
+                    grid_csv=args.grid_csv
                 )
     
     print("\n" + "="*70)
