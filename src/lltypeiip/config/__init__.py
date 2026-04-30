@@ -59,8 +59,11 @@ def load_config(config_path=None, resolve_paths=True):
     if resolve_paths and 'paths' in config_dict:
         paths_dict = config_dict['paths']
         for key, value in paths_dict.items():
-            if isinstance(value, str) and not Path(value).is_absolute():
-                paths_dict[key] = str(PROJECT_ROOT / value)
+            if isinstance(value, str):
+                value = os.path.expandvars(value)
+                if not Path(value).is_absolute():
+                    value = str(PROJECT_ROOT / value)
+                paths_dict[key] = value
         config_dict['paths'] = paths_dict
     
     # Handle other path-like entries (dustmaps, dusty)
@@ -69,8 +72,11 @@ def load_config(config_path=None, resolve_paths=True):
             if section in config_dict:
                 section_dict = config_dict[section]
                 for key, value in section_dict.items():
-                    if (key.endswith('_dir') or key in ("workdir",)) and isinstance(value, str) and not Path(value).is_absolute():
-                        section_dict[key] = str(PROJECT_ROOT / value)
+                    if (key.endswith('_dir') or key in ("workdir",)) and isinstance(value, str):
+                        value = os.path.expandvars(value)
+                        if not Path(value).is_absolute():
+                            value = str(PROJECT_ROOT / value)
+                        section_dict[key] = value
     
     return Config(config_dict)
 
