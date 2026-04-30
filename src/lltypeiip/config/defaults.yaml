@@ -46,7 +46,7 @@ dustmaps:
 
 dusty:
   # Path to DUSTY binary (linux) and data files (external installation)
-  dusty_file_dir: "/home/cal/analam/Documents/dusty/releaseV2"
+  dusty_file_dir: "${DUSTY_FILE_DIR}"
   # Base directory for DUSTY model runs (within project)
   workdir: "dusty_runs"
   workdir_mcmc_dir: "dusty_runs/mcmc_workdir"

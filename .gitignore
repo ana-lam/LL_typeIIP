@@ -17,3 +17,9 @@ src/ll_typeiip.egg-info/
 mcmc_logs/
 mcmc_results/
 mcmc_logs_template/
+notebooks/old_plots
+fitted_grids/**/**/ZTF*.csv
+figures/
+data/
+notebooks/
+results/

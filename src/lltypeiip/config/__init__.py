@@ -1,3 +1,4 @@
+import os
 import yaml
 from pathlib import Path
 
@@ -21,6 +22,8 @@ class Config:
                 if self._resolve_paths and (key.endswith('_dir') or key in ['workdir', 'params', 'ztf_coords', 'zenodo_meta']):
                     if isinstance(value, str) and not Path(value).is_absolute():
                         value = str(PROJECT_ROOT / value)
+                if isinstance(value, str):
+                    value = os.path.expandvars(value)
                 setattr(self, key, value)
     
     def __getitem__(self, key):
