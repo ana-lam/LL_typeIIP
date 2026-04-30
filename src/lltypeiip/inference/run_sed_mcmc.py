@@ -89,10 +89,10 @@ def main():
     template_mode = (args.template_path is not None)
 
     if args.cache_dir is None:
-    if template_mode:
-        args.cache_dir = str(config.dusty.template_npz_cache_dir)
-    else:
-        args.cache_dir = str(config.dusty.blackbody_npz_cache_dir)
+        if template_mode:
+            args.cache_dir = str(config.dusty.template_npz_cache_dir)
+        else:
+            args.cache_dir = str(config.dusty.blackbody_npz_cache_dir)
 
     print(f"Running MCMC for OID: {oid}")
     print(f"Posterior mode: {args.mode}")
