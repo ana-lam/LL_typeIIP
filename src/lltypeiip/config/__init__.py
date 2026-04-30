@@ -18,12 +18,13 @@ class Config:
                 # Pass resolve_paths flag to nested configs
                 setattr(self, key, Config(value, resolve_paths=self._resolve_paths))
             else:
+                # expand env vars first so absolute paths are recognised correctly
+                if isinstance(value, str):
+                    value = os.path.expandvars(value)
                 # Resolve relative paths in the 'paths' section
                 if self._resolve_paths and (key.endswith('_dir') or key in ['workdir', 'params', 'ztf_coords', 'zenodo_meta']):
                     if isinstance(value, str) and not Path(value).is_absolute():
                         value = str(PROJECT_ROOT / value)
-                if isinstance(value, str):
-                    value = os.path.expandvars(value)
                 setattr(self, key, value)
     
     def __getitem__(self, key):
