@@ -45,6 +45,12 @@ def parse_args():
     # optionally load one saved sed pickle instead of rebuilding
     p.add_argument("--sed-pkl", type=str, default=None,
                    help="Optional: path to a saved tail_sed pickle. Can be plain SED dict or payload with key 'sed'.")
+    
+    # evaluator mode
+    p.add_argument("--evaluator-mode", choices=["emulator", "dusty"], default="dusty",
+                   help="Mode for evaluating the model: 'emulator' or 'dusty'.")
+    p.add_argument("--emulator-path", type=str, default=None,
+                   help="Path to the emulator file (required if using 'emulator' mode).")
 
     # sampler params
     p.add_argument("--sweep", action="store_true",
@@ -193,18 +199,18 @@ def main():
         "data": dict(
             posterior_mode="data",
             init_mode="hybrid",
-            init_scales={"tstar_frac": 0.3, "tdust_frac": 0.3, "log10_tau": 1.0, "log10_a": 1.0},
+            init_scales={"tstar_frac": 0.1, "tdust_frac": 0.1, "log10_tau": 0.3, "log10_a": 0.3},
         ),
         "anchored": dict(
             posterior_mode="anchored",
             init_mode="around_best",
-            # keep your default anchored widths in run_mcmc_for_sed, or pass explicitly if you want
+            init_scales={"tstar_frac": 0.1, "tdust_frac": 0.1, "log10_tau": 0.3, "log10_a": 0.3},
         ),
         "mixture": dict(
             posterior_mode="mixture",
             mix_weight=args.mix_weight,
             init_mode="hybrid",
-            init_scales={"tstar_frac": 0.3, "tdust_frac": 0.3, "log10_tau": 1.0, "log10_a": 1.0},
+            init_scales={"tstar_frac": 0.1, "tdust_frac": 0.1, "log10_tau": 0.3, "log10_a": 0.3},
         ),
     }
 
@@ -239,6 +245,8 @@ def main():
             cache_max=args.cache_max,
             use_tmp=not args.no_tmp,
             run_tag=run_tag,
+            evaluator_mode=args.evaluator_mode,
+            emulator_path=args.emulator_path,
             **mode_kwargs[mode],
         )
 
@@ -266,6 +274,7 @@ def main():
             template_mode=results.get("template_mode", False),
             template_tag=results.get("template_tag", ""),
             shell_thickness=shell_thickness,
+            evaluator_mode=results.get("evaluator_mode", "dusty"),
         )
         
         print(f"Saved results to: {outpath}")

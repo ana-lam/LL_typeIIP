@@ -11,6 +11,7 @@ from ..dusty.scaling import compute_chi2
 from ..dusty.custom_spectrum import NugentIIPSeries
 from ..sed.build import _prepare_sed_xy, _unwrap_sed
 from .priors import log_prior
+from ..emulator import DustyNNEmulator, DustyTemplateEmulator
 
 def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2.
@@ -185,12 +186,12 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
     rng = np.random.default_rng(random_seed)
 
     if init_scales is None:
-        init_scales = dict(tstar_frac=0.25, 
-                           tdust_frac=0.25, 
-                           log10_tau=0.8, 
-                           log10_a=1.5)
+        init_scales = dict(tstar_frac=0.15, 
+                           tdust_frac=0.15, 
+                           log10_tau=0.5, 
+                           log10_a=0.5)
 
-    tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 12000.0))
+    tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 10000.0))
     tdust_bounds = prior_config.get("tdust_bounds", (100.0, 1500.0))
     log10_tau_bounds = prior_config.get("log10_tau_bounds", (-4.0, 2.0))
     log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
@@ -211,19 +212,37 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
             ], dtype=float)
 
     def draw_broad():
+        """
+        Use a 3-sigma envelope around best to keep walkers in reasonable territory.
+        """
+        scale = 3.0 # how many init_scales wide to draw from
         if ndim == 3:
-            return np.array([
-                rng.uniform(*tdust_bounds),
-                rng.uniform(*log10_tau_bounds),
-                rng.uniform(*log10_a_bounds),
+            cand = np.array([
+                best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + scale * init_scales["log10_tau"] * rng.standard_normal(),
+                best["log10_a"] + scale * init_scales["log10_a"] * rng.standard_normal(),
             ], dtype=float)
         else:
-            return np.array([
-                rng.uniform(*tstar_bounds),
-                rng.uniform(*tdust_bounds),
-                rng.uniform(*log10_tau_bounds),
-                rng.uniform(*log10_a_bounds),
+            cand = np.array([
+                best["tstar"] * (1. + scale * init_scales["tstar_frac"] * rng.standard_normal()),
+                best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + scale * init_scales["log10_tau"] * rng.standard_normal(),
+                best["log10_a"] + scale * init_scales["log10_a"] * rng.standard_normal(),
             ], dtype=float)
+        # Clip to prior bounds
+        if ndim == 4:
+            cand[0] = np.clip(cand[0], *tstar_bounds)
+            cand[1] = np.clip(cand[1], *tdust_bounds)
+            cand[2] = np.clip(cand[2], *log10_tau_bounds)
+            cand[3] = np.clip(cand[3], *log10_a_bounds)
+        else:
+            cand[0] = np.clip(cand[0], *tdust_bounds)
+            cand[1] = np.clip(cand[1], *log10_tau_bounds)
+            cand[2] = np.clip(cand[2], *log10_a_bounds)
+        return cand
+    
+    # 80/20 split around best
+    n_around = int(0.80 * nwalkers)
     
     p0 = np.zeros((nwalkers, ndim), dtype=float)
 
@@ -235,7 +254,7 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
             elif init_mode == "broad":
                 cand = draw_broad()
             elif init_mode == "hybrid":
-                cand = draw_around() if (k < nwalkers // 2) else draw_broad()
+                cand = draw_around() if (k < n_around) else draw_broad()
             else:
                 raise ValueError("init_mode must be one of: 'around_best', 'broad', 'hybrid'.")
 
@@ -262,10 +281,10 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      nwalkers=32, nsteps=4000, burn_in=1000, y_mode="Flam",
                      use_weights=True, n_cores=4, mp_prefer="fork",
                      random_seed=42, posterior_mode="data", mix_weight=0.3,
-                     tdust_sigma_frac=0.2, log10_tau_sigma=0.3, log10_a_sigma=1.0,
+                     tdust_sigma_frac=0.2, log10_tau_sigma=0.3, log10_a_sigma=0.5,
                      init_mode="hybrid", init_scales=None, progress_every=None,
                      cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True,
-                     run_tag=None):
+                     run_tag=None, evaluator_mode="dusty", emulator_path=None):
     """
     Run emcee for a given SED using DUSTY models.
 
@@ -295,17 +314,36 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     else:
         ndim = 4
 
-    dusty_runner = DustyRunner(
-                        base_workdir=workdir,
-                        dusty_file_dir=dusty_file_dir,
-                        dust_type=dust_type,
-                        shell_thickness=shell_thickness,
-                        cache_dir=cache_dir,
-                        cache_ndigits=cache_ndigits,
-                        cache_max=cache_max,
-                        use_tmp=use_tmp,
-                        run_tag=run_tag
-                    )
+    # Initialize the emulator if specified
+    if evaluator_mode == "emulator":
+        if emulator_path is None:
+            raise ValueError("emulator_path must be specified when using emulator mode.")
+        if not Path(emulator_path).exists():
+            raise FileNotFoundError(f"Emulator file not found: {emulator_path}")
+        if template_mode:
+            dusty_runner = DustyTemplateEmulator(emulator_path)
+        else:
+            dusty_runner = DustyNNEmulator(emulator_path)
+
+        print(f"[evaluator] mode=EMULATOR loaded from {emulator_path}")
+
+
+    elif evaluator_mode == "dusty":
+        print(f"[evaluator] mode=DUSTY cache={cache_dir}")
+
+        dusty_runner = DustyRunner(
+                            base_workdir=workdir,
+                            dusty_file_dir=dusty_file_dir,
+                            dust_type=dust_type,
+                            shell_thickness=shell_thickness,
+                            cache_dir=cache_dir,
+                            cache_ndigits=cache_ndigits,
+                            cache_max=cache_max,
+                            use_tmp=use_tmp,
+                            run_tag=run_tag
+                        )
+    else:
+        raise ValueError(f"evaluator_mode must be either 'emulator' or 'dusty'")
     
     # best-fit from grid
     grid_df = grid_df.sort_values("chi2_red").reset_index(drop=True)
@@ -374,24 +412,42 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     ctx = _pick_mp_context(prefer=mp_prefer)
     ncores = min(int(n_cores), nwalkers)
 
-    with ctx.Pool(processes=ncores) as pool:
-        sampler = emcee.EnsembleSampler(
-            nwalkers, ndim, log_probability,
-            args=(sed, dusty_runner, prior_config, y_mode, use_weights,
-                  template, template_tag, tstar_dummy, shell_thickness),
-            moves=emcee.moves.StretchMove(a=2.0),
-            pool=pool
-        )
-        print(f"Running MCMC: ndim={ndim}, nwalkers={nwalkers}, nsteps={nsteps}...", flush=True)
+    sampler_kwargs = dict(moves=emcee.moves.StretchMove(a=2.0))
 
+    def _run_sampler(sampler):
+        print(f"Running MCMC: ndim={ndim}, nwalkers={nwalkers}, "
+          f"nsteps={nsteps}...", flush=True)
         if progress_every is not None:
             state = p0
-            for i, state in enumerate(sampler.sample(state, iterations=nsteps), start=1):
+            for i, state in enumerate(
+                    sampler.sample(state, iterations=nsteps), start=1):
                 if (i == 1) or (i % progress_every == 0) or (i == nsteps):
                     print(f"[emcee] step {i}/{nsteps}", flush=True)
         else:
             sampler.run_mcmc(p0, nsteps, progress=True)
 
+    if evaluator_mode == "emulator":
+        # no pool
+        print(f"[pool] emulator mode — running single-threaded (no pool)", flush=True)
+        sampler = emcee.EnsembleSampler(
+            nwalkers, ndim, log_probability,
+            args=(sed, dusty_runner, prior_config, y_mode, use_weights,
+                template, template_tag, tstar_dummy, shell_thickness),
+            **sampler_kwargs
+        )
+        _run_sampler(sampler)
+    else:
+        print(f"[pool] dusty mode — using {ncores} cores", flush=True)
+        with ctx.Pool(processes=ncores) as pool:
+            sampler = emcee.EnsembleSampler(
+                nwalkers, ndim, log_probability, 
+                args=(sed, dusty_runner, prior_config, y_mode, use_weights,
+                      template, template_tag, tstar_dummy, shell_thickness),
+                pool=pool,
+                **sampler_kwargs,
+            )
+            _run_sampler(sampler)
+            
     # sampler = emcee.EnsembleSampler(nwalkers,
     #                                 ndim,
     #                                 log_probability,
