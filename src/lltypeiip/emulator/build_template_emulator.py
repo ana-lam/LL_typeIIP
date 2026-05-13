@@ -12,6 +12,12 @@ import numpy as np
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
+from .emulator import _build_mlp
+
 def _tau_str_to_float(s):
     idx = s.index("_")
     return float(f"{s[:idx]}.{s[idx+1:]}")
@@ -58,123 +64,236 @@ def _load_batch(args):
 def main():
 
     p = argparse.ArgumentParser(
-        description="Build template RegularGrid emulator from cached DUSTY npz files."
+        description="Build template NN emulator from cached DUSTY npz files."
     )
     p.add_argument("--cache-dir",    default="dusty_runs/dusty_npz_cache_template")
     p.add_argument("--output-path",     default="dusty_runs/dusty_tmpl_emulator_thick2_0.npz")
     p.add_argument("--thick-tag",    default="2_0")
     p.add_argument("--template-tag", default="nugent_iip")
-    p.add_argument("--n-workers",    type=int, default=8)
-    p.add_argument("--io-batch",     type=int, default=500)
+    p.add_argument("--max-models", type=int, default=300_000, 
+        help="Maximum number of models to include in the emulator.")
+    
+    p.add_argument("--hidden", type=int, default=512)
+    p.add_argument("--depth", type=int, default=5)
+    p.add_argument("--epochs", type=int, default=300)
+    p.add_argument("--batch-size", type=int, default=2048)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--val-frac", type=float, default=0.05,
+                   help="Fraction of the dataset to use for validation.")
+
+
+    p.add_argument("--n-workers", type=int, default=4,
+                   help="Number of worker processes to use for data loading.")
+    p.add_argument("--io-batch",    type=int, default=2000,
+                   help="Files per I/O batch")
+    p.add_argument("--seed", type=int, default=42)
+
     args = p.parse_args()
 
-    cache_dir = Path(args.cache_dir)
+    rng = np.random.default_rng(args.seed)
+    cache_dir   = Path(args.cache_dir)
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print("=" * 60)
-    print("TEMPLATE EMULATOR — BUILD (RegularGridInterpolator)")
-    print("=" * 60)
-    print(f"  cache_dir    : {cache_dir}")
-    print(f"  out_path     : {output_path}")
-    print(f"  thick_tag    : {args.thick_tag}")
-    print(f"  template_tag : {args.template_tag}")
-    print()
-
-    # first scan files
-    print("Scanning files...")
-    t0      = time.time()
+    # Step 1: scan filenames in cache
+    print("Scanning cache directory...")
+    t0 = time.time()
     records = []
     for f in sorted(cache_dir.glob(
             f"*thick_{args.thick_tag}*{args.template_tag}*.npz")):
         parsed = _parse_filename(f, args.thick_tag, args.template_tag)
         if parsed is not None:
             records.append((*parsed, f))
-    print(f"  {len(records):,} files in {time.time()-t0:.1f}s")
-
-    # grid axes
-    tdust_u = np.array(sorted({r[0] for r in records}))
-    tau_u   = np.array(sorted({r[1] for r in records}))
-    phase_u = np.array(sorted({r[2] for r in records}))
-    log10tau_u = np.log10(tau_u)
-
-    print(f"\n  T_dust : {len(tdust_u)} values  {tdust_u}")
-    print(f"  tau    : {len(tau_u)} values  [{tau_u[0]:.4f}, {tau_u[-1]:.2f}]")
-    print(f"  phase  : {len(phase_u)} values  [{phase_u[0]}, {phase_u[-1]}]")
-    n_exp = len(tdust_u) * len(tau_u) * len(phase_u)
-    print(f"  Expected: {n_exp:,}  Actual: {len(records):,}  "
-          f"({'✓ complete' if n_exp == len(records) else '✗ incomplete'})")
     
-    # ref wavelength grid
-    probe   = np.load(records[0][3])
+    print(f"  Found {len(records)} records in {time.time() - t0:.2f} seconds.")
+
+    if len(records) == 0:
+        raise RuntimeError("No valid records found in the cache directory.")
+    
+    # Step 2: subsample the records
+    if args.max_models > 0 and len(records) > args.max_models:
+        idx = rng.choice(len(records), size=args.max_models, replace=False)
+        records = [records[i] for i in sorted(idx)]
+        print(f"  Subsampled to {len(records)} records.")
+
+    # Step 3: get reference wavelength grid
+    probe = np.load(records[0][3])
     lam_ref = probe["lam_um"].astype(np.float32)
-    n_lam   = len(lam_ref)
-    print(f"\n  λ: {n_lam} pts  [{lam_ref[0]:.4f}, {lam_ref[-1]:.2f}] µm")
+    n_lam = len(lam_ref)
+    print(f"  Reference wavelength grid: {n_lam} points.")
 
-    mem_gb = len(tdust_u)*len(tau_u)*len(phase_u)*n_lam*4/1e9
-    print(f"  SED cube: {mem_gb*1000:.1f} MB (float32)")
-
-    # load data in batches
-    tdust_idx = {v: i for i, v in enumerate(tdust_u)}
-    tau_idx   = {v: i for i, v in enumerate(tau_u)}
-    phase_idx = {v: i for i, v in enumerate(phase_u)}
-
+    # Step 4: load the data in batches
     batches = [
         (records[i:i+args.io_batch], lam_ref, n_lam)
         for i in range(0, len(records), args.io_batch)
     ]
 
-    sed_cube = np.full(
-        (len(tdust_u), len(tau_u), len(phase_u), n_lam),
-        np.nan, dtype=np.float32
-    )
-
-    print(f"\nLoading {len(records):,} files "
+    print(f"\nLoading {len(records):,} SEDs "
           f"({len(batches)} batches, {args.n_workers} workers)...")
+    
+    X_list = [] # (tstar, tdust, log10tau)
+    Y_list = [] # log(flamlam)
+
     t0 = time.time()
-    n_loaded = n_errors = 0
+    n_loaded = n_skip = 0
 
     with ProcessPoolExecutor(max_workers=args.n_workers) as exe:
         futs = [exe.submit(_load_batch, b) for b in batches]
-        for i, fut in enumerate(as_completed(futs)):
+        for i, fut in enumerate(as_completed(futs)):   # ← enumerate gives 'i'
             for tdust, tau, phase, flamlam in fut.result():
-                ii = tdust_idx.get(tdust)
-                jj = tau_idx.get(tau)
-                kk = phase_idx.get(phase)
-                if None in (ii, jj, kk):
-                    n_errors += 1
-                    continue
-                sed_cube[ii, jj, kk, :] = flamlam
+                log10_tau = np.log10(max(tau, 1e-10))
+                X_list.append([tdust, log10_tau, float(phase)])
+                Y_list.append(np.log(np.clip(flamlam, 1e-10, None)))
                 n_loaded += 1
-            if (i+1) % 5 == 0 or (i+1) == len(batches):
-                print(f"  [{i+1:3d}/{len(batches)}]  "
-                      f"loaded={n_loaded:,}  err={n_errors}",
-                      flush=True)
-                
-    nan_frac = np.isnan(sed_cube).mean()
-    print(f"\nLoaded {n_loaded:,}  NaN={nan_frac:.2%}  "
-          f"time={time.time()-t0:.1f}s")
 
-    if nan_frac > 0.01:
-        print("WARNING: >1% NaN — grid may be incomplete")
-    
-    # save the result
-    print(f"\nSaving to {output_path}...")
-    np.savez_compressed(
-        output_path,
-        lam_ref    = lam_ref,
-        sed_cube   = sed_cube,        # (n_tdust, n_tau, n_phase, n_lam)
-        tdust_u    = tdust_u,
-        tau_u      = tau_u,
-        log10tau_u = log10tau_u,
-        phase_u    = phase_u,
-        thick_tag  = np.array([args.thick_tag]),
-        template_tag = np.array([args.template_tag]),
+            n_done = i + 1                             # ← now inside the loop
+            if n_done % 20 == 0 or n_done == len(batches):
+                rate = n_loaded / max(time.time() - t0, 1e-6)
+                eta  = (len(records) - n_loaded) / max(rate, 1)
+                print(f"  [{n_done:4d}/{len(batches)}]  "
+                    f"loaded={n_loaded:,}  "
+                    f"skip={n_skip}  "
+                    f"{rate:,.0f}/s  "
+                    f"ETA={eta/60:.1f}min", flush=True)
+
+    print(f"\nLoaded {n_loaded:,} models in {(time.time()-t0)/60:.1f}min")
+
+    X = np.array(X_list, dtype=np.float32)
+    Y = np.array(Y_list, dtype=np.float32)
+    print(f"X: {X.shape}  Y: {Y.shape}")
+    print(f"X ranges:   "
+          f"tdust=[{X[:,0].min():.1f}, {X[:,0].max():.1f}]  "
+          f"log10_tau=[{X[:,1].min():.2f}, {X[:,1].max():.2f}]  "
+          f"phase=[{X[:,2].min():.1f}, {X[:,2].max():.1f}]")
+
+    # Step 5: normalize
+    X_mean = X.mean(0).astype(np.float64)
+    X_std  = X.std(0).astype(np.float64)
+    Y_mean = Y.mean(0).astype(np.float64)
+    Y_std  = np.where(Y.std(0) > 0, Y.std(0), 1.0).astype(np.float64)
+
+    X_norm = ((X - X_mean) / X_std).astype(np.float32)
+    Y_norm = ((Y - Y_mean) / Y_std).astype(np.float32)
+
+    # Step 6: train/val split
+    n_val   = max(1, int(len(X_norm) * args.val_frac))
+    val_idx = rng.choice(len(X_norm), n_val, replace=False)
+    tr_mask = np.ones(len(X_norm), dtype=bool)
+    tr_mask[val_idx] = False
+
+    Xtr = torch.tensor(X_norm[tr_mask])
+    Ytr = torch.tensor(Y_norm[tr_mask])
+    Xva = torch.tensor(X_norm[~tr_mask])
+    Yva = torch.tensor(Y_norm[~tr_mask])
+    print(f"\nTrain: {len(Xtr):,}   Val: {len(Xva):,}")
+
+    tr_loader = DataLoader(TensorDataset(Xtr, Ytr),
+                           batch_size=args.batch_size, shuffle=True)
+
+    # Step 7: train
+    print(f"\nTraining on {device}  "
+          f"(hidden={args.hidden}, depth={args.depth}, "
+          f"epochs={args.epochs}, lr={args.lr})...")
+
+    model = _build_mlp(n_in=3, n_out=n_lam,
+                       hidden=args.hidden, depth=args.depth).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt, T_max=args.epochs
     )
-    print(f"Saved {output_path.stat().st_size/1e6:.1f} MB")
+
+    Xva_d = Xva.to(device)
+    Yva_d = Yva.to(device)
+
+    best_val = np.inf
+    best_state = None
+    t0 = time.time()
+
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        tr_losses = []
+        for Xb, Yb in tr_loader:
+            Xb, Yb = Xb.to(device), Yb.to(device)
+            loss = ((model(Xb) - Yb) ** 2).mean()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            tr_losses.append(loss.item())
+        sched.step()
+
+        # validation
+        model.eval()
+        with torch.no_grad():
+            val_loss = ((model(Xva_d) - Yva_d) ** 2).mean().item()
+
+        if val_loss < best_val:
+            best_val   = val_loss
+            best_state = {k: v.cpu().clone()
+                          for k, v in model.state_dict().items()}
+
+        if epoch % 50 == 0 or epoch == 1 or epoch == args.epochs:
+            print(f"  Epoch {epoch:4d}/{args.epochs}  "
+                  f"train={np.mean(tr_losses):.5f}  "
+                  f"val={val_loss:.5f}  "
+                  f"best_val={best_val:.5f}  "
+                  f"lr={sched.get_last_lr()[0]:.2e}  "
+                  f"elapsed={time.time()-t0:.0f}s")
+
+    print(f"\nBest val loss: {best_val:.5f}")
+    model.load_state_dict(best_state)
+
+    # Step 8: final validation
+    model.eval()
+    with torch.no_grad():
+        Y_pred_norm = model(Xva.to(device)).cpu().numpy()
+
+    Y_pred_log = Y_pred_norm * Y_std + Y_mean
+    Y_true_log = Y_norm[~tr_mask] * Y_std + Y_mean
+
+    # Back to linear flux
+    Y_pred_flux = np.exp(Y_pred_log)
+    Y_true_flux = np.exp(Y_true_log)
+
+    rel_err = np.abs(Y_pred_flux - Y_true_flux) / (np.abs(Y_true_flux) + 1e-10)
+    med_rel = np.median(rel_err)
+    p90_rel = np.percentile(rel_err, 90)
+    p99_rel = np.percentile(rel_err, 99)
+
+    print(f"\nValidation flux errors (relative, {len(Xva):,} models):")
+    print(f"  Median : {med_rel:.4f}  ({med_rel*100:.2f}%)")
+    print(f"  90th % : {p90_rel:.4f}  ({p90_rel*100:.2f}%)")
+    print(f"  99th % : {p99_rel:.4f}  ({p99_rel*100:.2f}%)")
+
+    if med_rel < 0.01:
+        print("  ✓ Excellent  (median < 1%)")
+    elif med_rel < 0.05:
+        print("  ~ Acceptable (median < 5%) — consider more epochs or larger network")
+    else:
+        print("  ✗ Poor       (median > 5%) — increase --epochs or --hidden")
+
+    # Step 9: save the model
+
+    print(f"\nSaving to {output_path}...")
+    save_dict = dict(
+        lam_ref = lam_ref,
+        X_mean  = X_mean,
+        X_std   = X_std,
+        Y_mean  = Y_mean,
+        Y_std   = Y_std,
+        X_train = X,          # kept for bounds checking in emulator
+    )
+
+    # Store weights with "w__" prefix, dots → double underscores
+    for k, v in best_state.items():
+        save_dict[f"w__{k.replace('.', '__')}"] = v.numpy()
+
+    np.savez_compressed(output_path, **save_dict)
+    sz = output_path.stat().st_size / 1e6
+    print(f"Saved {sz:.1f} MB")
     print(f"\nDone. Load with:")
-    print(f"  from lltypeiip.emulator import DustyTemplateEmulator")
-    print(f"  emu = DustyTemplateEmulator('{output_path}')")
+    print(f"  from lltypeiip.inference.emulator import DustyNNTemplateEmulator")
+    print(f"  emu = DustyNNTemplateEmulator('{output_path}')")
 
 if __name__ == "__main__":
     main()
