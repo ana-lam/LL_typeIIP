@@ -1,20 +1,36 @@
 #!/usr/bin/env python3
 """
-Summarize MCMC posterior results into a CSV with median & MAP + chi2 from analytic & MCMC sampled 
+Summarize MCMC posterior results into a CSV with median & MAP + chi2 from analytic & MCMC sampled
 log10a.
-   
-    # Single object, template mode, both thicknesses
-    python -m lltypeiip.inference.summarize_mcmc_results ZTF22abtspsw --mode template --thickness both
+
+    # Single object, template mode, both thicknesses (analytic a, no weights)
+    python -m lltypeiip.inference.summarize_mcmc_results ZTF22abtspsw --mode template --thickness both --seed 513
+
+    # All objects, template mode, both thicknesses
+    python -m lltypeiip.inference.summarize_mcmc_results --all --mode template --thickness both --seed 513
 
     # All objects, both modes, both thicknesses
     python -m lltypeiip.inference.summarize_mcmc_results --all --mode both --thickness both --seed 303
 
-    # adhoc fix
+    # Sampled log10a run (Mode B)
+    python -m lltypeiip.inference.summarize_mcmc_results --all --mode template --thickness both --seed 513 --a-tag smpl
+
+    # Weighted run
+    python -m lltypeiip.inference.summarize_mcmc_results --all --mode template --thickness both --seed 513 --weights
+
+    # Adhoc fix (e.g. no i-band)
     python -m lltypeiip.inference.summarize_mcmc_results ZTF22aaywnyg --mode template --thickness both --seed 317 --adhoc-fix no_i_band
+
+Filename convention (set by run_sed_mcmc.py):
+    analytic a, no weights:  mcmc_{oid}_{tag}_thick{X_X}_{mode}_anl_no_weights_seed{N}.npz
+    analytic a, weighted:    mcmc_{oid}_{tag}_thick{X_X}_{mode}_anl_seed{N}.npz
+    sampled a,  no weights:  mcmc_{oid}_{tag}_thick{X_X}_{mode}_smpl_no_weights_seed{N}.npz
+    sampled a,  weighted:    mcmc_{oid}_{tag}_thick{X_X}_{mode}_smpl_seed{N}.npz
 """
 
 import argparse
 import pickle
+from arrow import parser
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -43,8 +59,13 @@ TSTAR_DUMMY = 6000.0
 def _mcmc_tag(mode):
     return "template" if mode == "template" else "bb"
 
-def load_sed(oid, sed_dir=DEFAULT_SED_DIR):
-    sed_path = Path(sed_dir) / f"{oid}_tail_sed.pkl"
+def load_sed(oid, sed_dir=DEFAULT_SED_DIR, adhoc_fix=None):
+    if adhoc_fix is not None:
+        sed_path = Path(sed_dir) / f"{oid}_tail_sed_{adhoc_fix}.pkl"
+        if not sed_path.exists():
+            raise FileNotFoundError(f"Adhoc SED not found: {sed_path}")
+    else:
+        sed_path = Path(sed_dir) / f"{oid}_tail_sed.pkl"
     if not sed_path.exists():
         raise FileNotFoundError(f"SED not found: {sed_path}")
     with open(sed_path, "rb") as f:
@@ -89,7 +110,8 @@ def _compute_chi2_mcmc(lam_um, lamFlam, sed, log10_a, y_mode="Flam"):
 def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR, 
                           out_dir=DEFAULT_OUTPUT_DIR, sed_dir=DEFAULT_SED_DIR, 
                           workdir=DEFAULT_WORKDIR, cache_dir=DEFAULT_DUSTY_CACHE_DIR_BLACKBODY,
-                          mcmc_mode="mixture", seed=None, y_mode="Flam", adhoc_fix=None):
+                          mcmc_mode="mixture", seed=None, y_mode="Flam", adhoc_fix=None, 
+                          a_tag="anl", use_weights=True):
     """
     Summarize MCMC results for a single object, mode, and thickness. 
     Returns list of dicts for median row, MAP row.
@@ -98,16 +120,18 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     thick_str = str(thickness).replace('.', '_')
     tag = _mcmc_tag(mode)
 
+    w_str = "_no_weights" if not use_weights else ""
+
     if seed is None:
-        mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}.npz"
+        mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_{a_tag}{w_str}.npz"
     else:
         if adhoc_fix is not None:
-            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}_{adhoc_fix}.npz"
+            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_{a_tag}{w_str}_seed{seed}_{adhoc_fix}.npz"
         else:
-            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_seed{seed}.npz"
+            mcmc_path = Path(mcmc_dir) / oid / f"mcmc_{oid}_{tag}_thick{thick_str}_{mcmc_mode}_{a_tag}{w_str}_seed{seed}.npz"
 
     try:
-        sed = load_sed(oid, sed_dir=sed_dir)
+        sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
     except FileNotFoundError as e:
         print(f"Error loading SED for {oid}: {e}")
         return []
@@ -116,17 +140,30 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     samples = d["samples"]
     log_prob = d["log_prob"]
     grid_best = d["grid_best"].item()
+    analytic_log10a = bool(d['analytic_log10a'] if 'analytic_log10a' in d else False)
 
     if tag == "template":
-        tdust_samples = samples[:, 0]
-        log10_tau_samples = samples[:, 1]
-        log10_a_samples = samples[:, 2]
-        tstar_samples = np.full(len(samples), TSTAR_DUMMY)
+        if analytic_log10a:
+            tdust_samples = samples[:, 0]
+            log10_tau_samples = samples[:, 1]
+            log10_a_samples = d['log10_a_samples'] # derived 
+            tstar_samples = np.full(len(samples), TSTAR_DUMMY)
+        else:
+            tdust_samples = samples[:, 0]
+            log10_tau_samples = samples[:, 1]
+            log10_a_samples = samples[:, 2]
+            tstar_samples = np.full(len(samples), TSTAR_DUMMY)
     else:
-        tstar_samples = samples[:, 0]
-        tdust_samples = samples[:, 1]
-        log10_tau_samples = samples[:, 2]
-        log10_a_samples = samples[:, 3]
+        if analytic_log10a:
+            tstar_samples = samples[:, 0]
+            tdust_samples = samples[:, 1]
+            log10_tau_samples = samples[:, 2]
+            log10_a_samples = d['log10_a_samples'] # derived
+        else:
+            tstar_samples = samples[:, 0]
+            tdust_samples = samples[:, 1]
+            log10_tau_samples = samples[:, 2]
+            log10_a_samples = samples[:, 3]
     
     def _stats(vals):
         med = np.median(vals)
@@ -222,6 +259,8 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
     else:
         print(f"    MAP: DUSTY failed")
 
+
+
     # ---- build single row ----
     row = dict(
         oid = oid,
@@ -265,6 +304,7 @@ def summarize_mcmc_results(oid, mode, thickness, mcmc_dir=DEFAULT_MCMC_DIR,
         grid_tdust = grid_best.get("tdust"),
         grid_log10_tau = grid_best.get("log10_tau"),
         grid_log10_a = grid_best.get("log10_a"),
+        mcmc_path = mcmc_path.resolve()
     )
 
     if tag != "template":
@@ -300,6 +340,12 @@ def main():
     parser.add_argument("--sed-dir", default=str(DEFAULT_SED_DIR))
     parser.add_argument("--workdir", default=str(DEFAULT_WORKDIR))
     parser.add_argument("--cache-dir", default=None)
+
+    parser.add_argument("--no-weights", action="store_true", default=False)
+    parser.add_argument("--a-tag", choices=["anl", "smpl"], default="anl")
+
+    parser.add_argument("--suffix_tag", type=str, default="",
+                        help="Optional tag to append to output filename")
 
     args = parser.parse_args()
 
@@ -340,6 +386,8 @@ def main():
                     mcmc_mode=args.mcmc_mode,
                     seed=args.seed,
                     adhoc_fix=args.adhoc_fix,
+                    use_weights=not args.no_weights,
+                    a_tag=args.a_tag,
                 )
                 if row is not None:
                     all_rows.append(row)
@@ -376,19 +424,19 @@ def main():
     if mode == "both":
         if args.seed is not None:
             if args.adhoc_fix is not None:
-                out_path = out_dir / f"mcmc_summary_seed{args.seed}_{args.oid}_{args.adhoc_fix}.csv"
+                out_path = out_dir / f"mcmc_summary_seed{args.seed}_{args.oid}_{args.adhoc_fix}{args.suffix_tag}.csv"
             else:
-                out_path = out_dir / f"mcmc_summary_seed{args.seed}.csv"
+                out_path = out_dir / f"mcmc_summary_seed{args.seed}{args.suffix_tag}.csv"
         else:
-            out_path = out_dir / "mcmc_summary.csv"
+            out_path = out_dir / f"mcmc_summary{args.suffix_tag}.csv"
     else:
         if args.seed is not None:
             if args.adhoc_fix is not None:
-                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}_{args.oid}_{args.adhoc_fix}.csv"
+                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}_{args.oid}_{args.adhoc_fix}{args.suffix_tag}.csv"
             else:
-                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}.csv"
+                out_path = out_dir / f"mcmc_summary_{mode}_seed{args.seed}{args.suffix_tag}.csv"
         else:
-            out_path = out_dir / f"mcmc_summary_{mode}.csv"
+            out_path = out_dir / f"mcmc_summary_{mode}{args.suffix_tag}.csv"
     df.to_csv(out_path, index=False)
 
     print(f"\n{'='*60}")
