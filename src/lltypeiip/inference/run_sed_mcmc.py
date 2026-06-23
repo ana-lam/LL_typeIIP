@@ -63,6 +63,11 @@ def parse_args():
     p.add_argument("--ncores", type=int, default=4)
     p.add_argument("--progress-every", type=int, default=100)
 
+    # log10_a sampling mode
+    p.add_argument("--sample-log10a", action="store_true", default=False,
+                   help="Whether to sample log10_a or compute it analytically.")
+    p.add_argument("--log10a-range", type=float, default=3.0)
+
     # mixture
     p.add_argument("--mix-weight", type=float, default=0.3,
                    help="Gaussian weight for mixture prior")
@@ -83,6 +88,14 @@ def parse_args():
     # shell thickness
     p.add_argument("--shell-thickness", type=float, default=2.0,
                    help="Shell thickness (Y_out/Y_in). Default: 2.0")
+    
+    # no weights for chi2 fitting
+    p.add_argument("--no-weights", action="store_true",
+                   help="Disable weights for chi2 fitting (i.e. use unweighted residuals)")
+    p.add_argument("--err-floor-frac", type=float, default=0.0,
+                   help="Fractional error floor to add in quadrature to observed flux uncertainties. Default: 0.0 (no error floor)")
+    p.add_argument("--equal-weights", action="store_true", default=False,
+                   help="Use equal weights for all data points in chi2")
 
     return p.parse_args()
 
@@ -99,6 +112,12 @@ def main():
             args.cache_dir = str(config.dusty.template_npz_cache_dir)
         else:
             args.cache_dir = str(config.dusty.blackbody_npz_cache_dir)
+
+    if args.no_weights:
+        use_weights = False
+        print("Running with unweighted chi2 (no weights).")
+    else:
+        use_weights = True
 
     print(f"Running MCMC for OID: {oid}")
     print(f"Posterior mode: {args.mode}")
@@ -247,12 +266,32 @@ def main():
             run_tag=run_tag,
             evaluator_mode=args.evaluator_mode,
             emulator_path=args.emulator_path,
+            use_weights=use_weights,
+            sample_log10a=args.sample_log10a,
+            log10_a_range=args.log10a_range,
+            err_floor_frac=args.err_floor_frac,
+            equal_weights=args.equal_weights,
             **mode_kwargs[mode],
         )
 
         suffix = f"_seed{args.seed}"
         thick_str = str(shell_thickness).replace('.', '_')
-        outname = f"mcmc_{oid}_{('template' if template_mode else 'bb')}_thick{thick_str}_{mode}{suffix}{run_id_suffix}.npz"
+
+        a_tag = "anl" if not args.sample_log10a else "smpl"
+
+        if not use_weights:
+            outname = (
+                f"mcmc_{oid}_{('template' if template_mode else 'bb')}"
+                f"_thick{thick_str}_{mode}_{a_tag}_no_weights_seed{args.seed}"
+                f"{run_id_suffix}.npz"
+            )
+        else:
+            outname = (
+                f"mcmc_{oid}_{('template' if template_mode else 'bb')}"
+                f"_thick{thick_str}_{mode}_{a_tag}_seed{args.seed}"
+                f"{run_id_suffix}.npz"
+            )
+
         outpath = outdir / outname
 
         np.savez(
@@ -269,12 +308,16 @@ def main():
             a=results["a"],
             grid_best=results["grid_best"],
             prior_config=results["prior_config"],
+            log10_a_samples=results["log10_a_samples"],
+            analytic_log10a=results["analytic_log10a"],
             seed=args.seed,
             mode=mode,
             template_mode=results.get("template_mode", False),
             template_tag=results.get("template_tag", ""),
             shell_thickness=shell_thickness,
             evaluator_mode=results.get("evaluator_mode", "dusty"),
+            err_floor_frac=args.err_floor_frac,
+            equal_weights=args.equal_weights
         )
         
         print(f"Saved results to: {outpath}")

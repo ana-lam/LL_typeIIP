@@ -18,15 +18,23 @@ def _log_mix(lnN, w):
     return np.logaddexp(np.log(w) + lnN, np.log(1.0 - w))
 
 def log_prior(theta, tstar_bounds=(1000., 10000.), #1000, 10000.
-              tdust_bounds=(100., 1500.),
-              log10_tau_bounds=(-4, 2.),
+              tdust_bounds=(100., 2000.),
+              log10_tau_bounds=(-2., 2.),
               log10_a_bounds=(-20., 0.),
               best=None, prior_mode="data", 
               tstar_sigma_frac=None, tdust_sigma_frac=None,
               log10_tau_sigma=None, log10_a_sigma=None,
-              mix_weight=0.3):
+              mix_weight=0.3, sample_log10a=True):
     """
-    theta = (tstar, tdust, log10_tau, log10_a)
+    theta layout depends on sample_log10a:
+
+      sample_log10a=True  (sample log10_a):
+        4D blackbody:  (tstar, tdust, log10_tau, log10_a)
+        3D template:   (tdust, log10_tau, log10_a)
+
+      sample_log10a=False (analytic a):
+        3D blackbody:  (tstar, tdust, log10_tau)
+        2D template:   (tdust, log10_tau)
 
     prior_mode:
         - "data": uniform within data bounds (data-driven prior)
@@ -37,16 +45,26 @@ def log_prior(theta, tstar_bounds=(1000., 10000.), #1000, 10000.
 
     theta = np.asarray(theta, float)
 
-    if theta.size == 4:
-        tstar, tdust, log10_tau, log10_a = theta
-        use_tstar = True
-    # do not sample Tstar for Spectrum=5
-    elif theta.size == 3:
-        tdust, log10_tau, log10_a = theta
-        tstar = None
-        use_tstar = False
+    if sample_log10a:
+        if theta.size == 4:
+            tstar, tdust, log10_tau, log10_a = theta
+            use_tstar = True
+        elif theta.size == 3:
+            tdust, log10_tau, log10_a = theta
+            tstar = None
+            use_tstar = False
+        else:
+            return -np.inf
     else:
-        return -np.inf
+        if theta.size == 3:
+            tstar, tdust, log10_tau = theta
+            use_tstar = True
+        elif theta.size == 2:
+            tdust, log10_tau = theta
+            tstar = None
+            use_tstar = False
+        else:
+            return -np.inf
     
     # hard bounds
     if use_tstar:
@@ -56,8 +74,9 @@ def log_prior(theta, tstar_bounds=(1000., 10000.), #1000, 10000.
         return -np.inf
     if not np.isfinite(_log_uniform_within(log10_tau, log10_tau_bounds)):
         return -np.inf
-    if not np.isfinite(_log_uniform_within(log10_a, log10_a_bounds)):
-        return -np.inf
+    if sample_log10a:
+        if not np.isfinite(_log_uniform_within(log10_a, log10_a_bounds)):
+            return -np.inf
 
     if prior_mode == "data":
         return 0.0
@@ -72,7 +91,7 @@ def log_prior(theta, tstar_bounds=(1000., 10000.), #1000, 10000.
     ln_tstar = _log_normal(tstar, best.get("tstar", 0.0), tstar_sigma) if use_tstar else 0.0
     ln_tdust = _log_normal(tdust, best['tdust'], tdust_sigma)
     ln_log10_tau = _log_normal(log10_tau, best["log10_tau"], log10_tau_sigma)
-    ln_log10_a = _log_normal(log10_a, best["log10_a"], log10_a_sigma)
+    ln_log10_a = _log_normal(log10_a, best["log10_a"], log10_a_sigma) if sample_log10a else 0.0
 
     if prior_mode == "anchored":
         return ln_tstar + ln_tdust + ln_log10_tau + ln_log10_a

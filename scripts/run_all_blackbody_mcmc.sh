@@ -4,10 +4,8 @@ set -euo pipefail
 OIDS_FILE="sed_sample.txt"
 LOGDIR="mcmc_logs"
 
-NJOBS=5
-NCORES_PER_THICK=2
-
-mkdir -p "$LOGDIR"
+NJOBS=15
+NCORES_PER_THICK=4
 
 mkdir -p "$LOGDIR"
 
@@ -20,10 +18,9 @@ echo "Total cores used  : $((NJOBS * NCORES_PER_THICK * 2))"
 echo "Logs in           : $LOGDIR"
 echo
 
-taskset -c 0-15 parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
-  ./run_one_blackbody_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0317 \
+parallel -j "$NJOBS" --eta --joblog "${LOGDIR}/joblog.tsv" --lb \
+  ./run_one_blackbody_mcmc.sh {} "$LOGDIR" "$NCORES_PER_THICK" 0430 \
   :::: "$OIDS_FILE"
 
 echo
 echo "All BLACKBODY-MCMC jobs finished at $(date)"
-

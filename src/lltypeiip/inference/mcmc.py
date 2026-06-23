@@ -13,7 +13,8 @@ from ..sed.build import _prepare_sed_xy, _unwrap_sed
 from .priors import log_prior
 from ..emulator import DustyNNEmulator, DustyTemplateEmulator
 
-def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
+def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True,
+                       err_floor_frac=0.0, equal_weights=False):
     """Analytic best-fit scale and chi2 on the SED grid; if ``a`` is provided, only chi2.
 
     - If a is None, compute the analytic best-fit scale using detections only.
@@ -46,6 +47,13 @@ def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=
     x_det = x_sed[det_mask]
     y_det = y_sed[det_mask]
     ey_det = ey_sed[det_mask]
+
+    if use_weights and err_floor_frac > 0.0:
+        if equal_weights:
+            ey_det = err_floor_frac * y_det
+        else:
+            ey_det = np.maximum(ey_det, err_floor_frac * y_det)
+
     y_mod_det = np.interp(x_det, x_mod, y_mod)
 
     # -- get analytic scale from detections only --
@@ -82,59 +90,84 @@ def _ls_scale_and_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=
 def log_likelihood(theta, sed, dusty_runner,
                    y_mode="Flam", use_weights=True,
                    template=None, template_tag="nugent_iip",
-                   tstar_dummy=6000.0, shell_thickness=None):
+                   tstar_dummy=6000.0, shell_thickness=None,
+                   sample_log10a=True, err_floor_frac=0.0, equal_weights=False):
     """
+    sample_log10a=True: theta includes log10_a as a parameter to sample
+    sample_log10a=False: theta has no log10_a; a solved analytically
+
     Template mode theta (3D): (tdust, log10_tau, log10_a)
     Blackbody mode theta (4D): (tstar, tdust, log10_tau, log10_a)
     """
-    # if len(theta) != 4:
-    #     tstar, tdust, log10_tau = theta
-    #     tau = 10.0**log10_tau
-    #     a = None
-    # else:
-    #     tstar, tdust, log10_tau, log10_a = theta
-    #     tau = 10.0**log10_tau
-    #     a = 10.0**log10_a
 
     sed = _unwrap_sed(sed)
 
     theta = np.asarray(theta, float)
 
-    if theta.size == 3:
-        tdust, log10_tau, log10_a = theta
-        tau = 10.0**log10_tau
-        a = 10.0**log10_a
+    a = None # analytic by default
 
-        # template needs phase_days
-        phase = sed.get("phase_days", sed.get("phase", None))
-        if phase is None or not np.isfinite(float(phase)):
+    if sample_log10a:
+        if theta.size == 3: # template
+            tdust, log10_tau, log10_a = theta
+            a = 10.0**log10_a
+            tau = 10.0**log10_tau
+            phase = sed.get("phase_days", sed.get("phase", None))
+            if phase is None or not np.isfinite(float(phase)):
+                return -np.inf
+            lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
+                tstar=float(tstar_dummy),
+                tdust=float(tdust),
+                tau=float(tau),
+                shell_thickness=shell_thickness,
+                template=template,
+                phase_days=float(phase),
+                template_tag=str(template_tag),
+            )
+        elif theta.size == 4: # blackbody
+            tstar, tdust, log10_tau, log10_a = theta
+            a = 10.0**log10_a
+            tau = 10.0**log10_tau
+            lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
+                float(tstar),
+                float(tdust), 
+                float(tau), 
+                shell_thickness=shell_thickness)
+        else:
             return -np.inf
-
-        lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
-            tstar=float(tstar_dummy),
-            tdust=float(tdust),
-            tau=float(tau),
-            shell_thickness=shell_thickness,
-            template=template,
-            phase_days=float(phase),
-            template_tag=str(template_tag),
-        )
-
-    elif theta.size == 4:
-        tstar, tdust, log10_tau, log10_a = theta
-        tau = 10.0**log10_tau
-        a = 10.0**log10_a
-        lam_um, lamFlam, r1 = dusty_runner.evaluate_model(float(tstar), float(tdust), float(tau), shell_thickness=shell_thickness)
-
     else:
-        return -np.inf
+        if theta.size == 2: # template
+            tdust, log10_tau = theta
+            tau = 10.0**log10_tau
+            phase = sed.get("phase_days", sed.get("phase", None))
+            if phase is None or not np.isfinite(float(phase)):
+                return -np.inf
+            lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
+                tstar=float(tstar_dummy),
+                tdust=float(tdust),
+                tau=float(tau),
+                shell_thickness=shell_thickness,
+                template=template,
+                phase_days=float(phase),
+                template_tag=str(template_tag),
+            )
+        elif theta.size == 3: # blackbody
+            tstar, tdust, log10_tau = theta
+            tau = 10.0**log10_tau
+            lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
+                float(tstar),
+                float(tdust), 
+                float(tau), 
+                shell_thickness=shell_thickness)
+        else:
+            return -np.inf
 
 
     if lam_um is None or lamFlam is None:
         return -np.inf
 
+    # a=None triggers analytic scale and chi2 computation in _ls_scale_and_chi2
     scale, chi2 = _ls_scale_and_chi2(
-        lam_um, lamFlam, sed, a=a, y_mode=y_mode, use_weights=use_weights
+        lam_um, lamFlam, sed, a=a, y_mode=y_mode, use_weights=use_weights, err_floor_frac=err_floor_frac, equal_weights=equal_weights
     )
     if not np.isfinite(chi2):
         return -np.inf
@@ -145,14 +178,18 @@ def log_likelihood(theta, sed, dusty_runner,
 def log_probability(theta, sed, dusty_runner, prior_config,
                     y_mode="Flam", use_weights=True,
                     template=None, template_tag="nugent_iip",
-                    tstar_dummy=6000.0, shell_thickness=None):
+                    tstar_dummy=6000.0, shell_thickness=None,
+                    sample_log10a=True, err_floor_frac=0.0, equal_weights=False):
     lp = log_prior(theta, **prior_config)
     if not np.isfinite(lp):
         return -np.inf
     ll = log_likelihood(theta, sed, dusty_runner,
-                        y_mode=y_mode, use_weights=use_weights,
+                        y_mode=y_mode, use_weights=use_weights, 
+                        err_floor_frac=err_floor_frac, 
+                        equal_weights=equal_weights,
                         template=template, template_tag=template_tag,
-                        tstar_dummy=tstar_dummy, shell_thickness=shell_thickness)
+                        tstar_dummy=tstar_dummy, shell_thickness=shell_thickness,
+                        sample_log10a=sample_log10a)
     if not np.isfinite(ll):
         return -np.inf
     return lp + ll
@@ -190,20 +227,53 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
                            tdust_frac=0.15, 
                            log10_tau=0.5, 
                            log10_a=0.5)
+        
+    tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 10000.0))
+    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 2000.0))
+    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-2.0, 2.0))
+    log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
+
+    # ---- clip best to prior bounds in case grid best is at an old boundary ----
+    best = best.copy()
+    best["tdust"] = np.clip(best["tdust"],
+                            tdust_bounds[0] + 10.0,
+                            tdust_bounds[1] - 10.0)
+    best["log10_tau"] = np.clip(best["log10_tau"],
+                                log10_tau_bounds[0] + 0.1,
+                                log10_tau_bounds[1] - 0.1)
+    if "tstar" in best:
+        best["tstar"] = np.clip(best["tstar"],
+                                tstar_bounds[0] + 10.0,
+                                tstar_bounds[1] - 10.0)
+    if "log10_a" in best:
+        best["log10_a"] = np.clip(best["log10_a"],
+                                log10_a_bounds[0] + 0.1,
+                                log10_a_bounds[1] - 0.1)
 
     tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 10000.0))
-    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 1500.0))
-    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-4.0, 2.0))
+    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 2000.0))
+    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-2.0, 2.0))
     log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
 
     def draw_around():
-        if ndim == 3:
+        if ndim == 2: # template, analytic a
+            return np.array([
+                best["tdust"] * (1.0 + init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + init_scales["log10_tau"] * rng.standard_normal(),
+            ], dtype=float)
+        elif ndim == 3 and "tstar" not in best: # template, sample log10_a
             return np.array([
                 best["tdust"] * (1.0 + init_scales["tdust_frac"] * rng.standard_normal()),
                 best["log10_tau"] + init_scales["log10_tau"] * rng.standard_normal(),
                 best["log10_a"] + init_scales["log10_a"] * rng.standard_normal(),
             ], dtype=float)
-        else:
+        elif ndim == 3 and "tstar" in best: # blackbody, analytic a
+            return np.array([
+                best["tstar"] * (1.0 + init_scales["tstar_frac"] * rng.standard_normal()),
+                best["tdust"] * (1.0 + init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + init_scales["log10_tau"] * rng.standard_normal(),
+            ], dtype=float)
+        else: # ndim==4, blackbody, sample log10_a
             return np.array([
                 best["tstar"] * (1.0 + init_scales["tstar_frac"] * rng.standard_normal()),
                 best["tdust"] * (1.0 + init_scales["tdust_frac"] * rng.standard_normal()),
@@ -216,13 +286,24 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
         Use a 3-sigma envelope around best to keep walkers in reasonable territory.
         """
         scale = 3.0 # how many init_scales wide to draw from
-        if ndim == 3:
+        if ndim == 2: # template, analytic a
+            cand = np.array([
+                best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + scale * init_scales["log10_tau"] * rng.standard_normal(),
+            ], dtype=float)
+        elif ndim == 3 and "tstar" not in best: # template, sample log10_a
             cand = np.array([
                 best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
                 best["log10_tau"] + scale * init_scales["log10_tau"] * rng.standard_normal(),
                 best["log10_a"] + scale * init_scales["log10_a"] * rng.standard_normal(),
             ], dtype=float)
-        else:
+        elif ndim == 3 and "tstar" in best: # blackbody, analytic a
+            cand = np.array([
+                best["tstar"] * (1. + scale * init_scales["tstar_frac"] * rng.standard_normal()),
+                best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
+                best["log10_tau"] + scale * init_scales["log10_tau"] * rng.standard_normal(),
+            ], dtype=float)
+        else: # ndim==4, blackbody, sample log10_a
             cand = np.array([
                 best["tstar"] * (1. + scale * init_scales["tstar_frac"] * rng.standard_normal()),
                 best["tdust"] * (1. + scale * init_scales["tdust_frac"] * rng.standard_normal()),
@@ -230,15 +311,22 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
                 best["log10_a"] + scale * init_scales["log10_a"] * rng.standard_normal(),
             ], dtype=float)
         # Clip to prior bounds
-        if ndim == 4:
+        if ndim == 2:
+            cand[0] = np.clip(cand[0], *tdust_bounds)
+            cand[1] = np.clip(cand[1], *log10_tau_bounds)
+        elif ndim == 3 and "tstar" not in best:
+            cand[0] = np.clip(cand[0], *tdust_bounds)
+            cand[1] = np.clip(cand[1], *log10_tau_bounds)
+            cand[2] = np.clip(cand[2], *log10_a_bounds)
+        elif ndim == 3 and "tstar" in best:
+            cand[0] = np.clip(cand[0], *tstar_bounds)
+            cand[1] = np.clip(cand[1], *tdust_bounds)
+            cand[2] = np.clip(cand[2], *log10_tau_bounds)
+        else:
             cand[0] = np.clip(cand[0], *tstar_bounds)
             cand[1] = np.clip(cand[1], *tdust_bounds)
             cand[2] = np.clip(cand[2], *log10_tau_bounds)
             cand[3] = np.clip(cand[3], *log10_a_bounds)
-        else:
-            cand[0] = np.clip(cand[0], *tdust_bounds)
-            cand[1] = np.clip(cand[1], *log10_tau_bounds)
-            cand[2] = np.clip(cand[2], *log10_a_bounds)
         return cand
     
     # 80/20 split around best
@@ -284,7 +372,9 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
                      tdust_sigma_frac=0.2, log10_tau_sigma=0.3, log10_a_sigma=0.5,
                      init_mode="hybrid", init_scales=None, progress_every=None,
                      cache_dir=None, cache_ndigits=4, cache_max=5000, use_tmp=True,
-                     run_tag=None, evaluator_mode="dusty", emulator_path=None):
+                     run_tag=None, evaluator_mode="dusty", emulator_path=None,
+                     sample_log10a=True, log10_a_range=3.0, err_floor_frac=0.0, 
+                     equal_weights=False):
     """
     Run emcee for a given SED using DUSTY models.
 
@@ -310,9 +400,6 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     template_mode = (template_path is not None)
     if template_mode:
         template = NugentIIPSeries(str(Path(template_path).resolve()))
-        ndim = 3
-    else:
-        ndim = 4
 
     # Initialize the emulator if specified
     if evaluator_mode == "emulator":
@@ -350,34 +437,48 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
     best_row = grid_df.iloc[0]
 
     if template_mode:
+        ndim = 3 if sample_log10a else 2
         best = {
             "tdust": float(best_row["tdust"]),
             "log10_tau": np.log10(float(best_row["tau"])),
             "log10_a": np.log10(float(best_row["scale"])),
         }
+        log10_a_best = best["log10_a"]
+        log10_a_bounds = (
+            (log10_a_best - log10_a_range, log10_a_best + log10_a_range)
+            if sample_log10a else
+            (-20.0, 0.0)
+        )
         prior_config = dict(
-            tdust_bounds=(50., 1500.),
-            log10_tau_bounds=(-4., 2.),
-            log10_a_bounds=(-20., 0.),
+            tdust_bounds=(50., 2000.),
+            log10_tau_bounds=(-2., 2.),
+            log10_a_bounds=log10_a_bounds,
             best=best,
             prior_mode=posterior_mode,
             mix_weight=mix_weight,
             tdust_sigma_frac=tdust_sigma_frac,
             log10_tau_sigma=log10_tau_sigma,
             log10_a_sigma=log10_a_sigma,
+            sample_log10a=sample_log10a,
         )
     else:
+        ndim = 4 if sample_log10a else 3
         best = {
             "tstar": float(best_row["tstar"]),
             "tdust": float(best_row["tdust"]),
             "log10_tau": np.log10(float(best_row["tau"])),
             "log10_a": np.log10(float(best_row["scale"])),
         }
+        log10_a_best = best["log10_a"]
+        log10_a_bounds = (
+            (log10_a_best - log10_a_range, log10_a_best + log10_a_range)
+            if sample_log10a else (-20., 0.)
+        )
         prior_config = dict(
             tstar_bounds=(2000., 12000.),
-            tdust_bounds=(100., 1500.),
-            log10_tau_bounds=(-4., 2.),
-            log10_a_bounds=(-20., 0.),
+            tdust_bounds=(100., 2000.),
+            log10_tau_bounds=(-2., 2.),
+            log10_a_bounds=log10_a_bounds,
             best=best,
             prior_mode=posterior_mode,
             mix_weight=mix_weight,
@@ -385,6 +486,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             tdust_sigma_frac=tdust_sigma_frac,
             log10_tau_sigma=log10_tau_sigma,
             log10_a_sigma=log10_a_sigma,
+            sample_log10a=sample_log10a,
         )
 
 
@@ -432,7 +534,7 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         sampler = emcee.EnsembleSampler(
             nwalkers, ndim, log_probability,
             args=(sed, dusty_runner, prior_config, y_mode, use_weights,
-                template, template_tag, tstar_dummy, shell_thickness),
+                template, template_tag, tstar_dummy, shell_thickness, sample_log10a, err_floor_frac, equal_weights),
             **sampler_kwargs
         )
         _run_sampler(sampler)
@@ -442,18 +544,11 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             sampler = emcee.EnsembleSampler(
                 nwalkers, ndim, log_probability, 
                 args=(sed, dusty_runner, prior_config, y_mode, use_weights,
-                      template, template_tag, tstar_dummy, shell_thickness),
+                      template, template_tag, tstar_dummy, shell_thickness, sample_log10a, err_floor_frac, equal_weights),
                 pool=pool,
                 **sampler_kwargs,
             )
             _run_sampler(sampler)
-            
-    # sampler = emcee.EnsembleSampler(nwalkers,
-    #                                 ndim,
-    #                                 log_probability,
-    #                                 args=(sed, dusty_runner, prior_config, y_mode))
-    # print(f"Running MCMC: nwalkers={nwalkers}, nsteps={nsteps}...")
-    # sampler.run_mcmc(p0, nsteps, progress=True)
 
     # discard burn-in and flatten
     samples = sampler.get_chain(discard=burn_in, flat=True)
@@ -471,19 +566,58 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
 
 
     # unpack
-    if ndim == 3:
-        tdust_samples = samples[:, 0]
-        log10_tau_samples = samples[:, 1]
-        log10_a_samples = samples[:, 2]
-        tstar_samples = np.full_like(tdust_samples, float(tstar_dummy))
+    if sample_log10a:
+        if ndim == 3: # template + sample_log10a
+            tdust_samples = samples[:, 0]
+            log10_tau_samples = samples[:, 1]
+            log10_a_samples = samples[:, 2]
+            tstar_samples = np.full_like(tdust_samples, float(tstar_dummy))
+        else: # blackbody + sample_log10a
+            tstar_samples = samples[:, 0]
+            tdust_samples = samples[:, 1]
+            log10_tau_samples = samples[:, 2]
+            log10_a_samples = samples[:, 3]
     else:
-        tstar_samples = samples[:, 0]
-        tdust_samples = samples[:, 1]
-        log10_tau_samples = samples[:, 2]
-        log10_a_samples = samples[:, 3]
+        print("Deriving log10_a analytically for each posterior sample...", flush=True)
+        if ndim == 2: # template + analytic a
+            tdust_samples = samples[:, 0]
+            log10_tau_samples = samples[:, 1]
+            tstar_samples = np.full_like(tdust_samples, float(tstar_dummy))
+        else: # blackbody + analytic a
+            tstar_samples = samples[:, 0]
+            tdust_samples = samples[:, 1]
+            log10_tau_samples = samples[:, 2]
+
+        phase = sed.get("phase_days", sed.get("phase", None))
+        log10_a_samples = np.full(len(samples), np.nan)
+
+        for i, (tdust_i, log10_tau_i) in enumerate(zip(tdust_samples, log10_tau_samples)):
+            if i % 500 == 0 or i == len(samples) - 1:
+                print(f"  Processing sample {i+1}/{len(samples)}...", flush=True)
+            tau_i = 10.0 ** log10_tau_i
+            tstar_i = float(tstar_samples[i])
+            lam_um, lamFlam, r1 = dusty_runner.evaluate_model(
+                tstar=tstar_i,
+                tdust=tdust_i,
+                tau=tau_i,
+                shell_thickness=shell_thickness,
+                template=template,
+                phase_days=float(phase) if phase is not None else None,
+                template_tag=template_tag,
+            )
+            if lam_um is not None:
+                a_i, _ = _ls_scale_and_chi2(
+                    lam_um, lamFlam, sed, a=None, y_mode=y_mode, use_weights=use_weights, err_floor_frac=err_floor_frac,
+                    equal_weights=equal_weights
+                )
+                if np.isfinite(a_i) and (a_i > 0):
+                    log10_a_samples[i] = np.log10(a_i)
+        print(f"  Derived log10_a for {np.sum(np.isfinite(log10_a_samples))}"
+                f"/{len(log10_a_samples)} samples.", flush=True)
 
     tau_samples = 10.0 ** log10_tau_samples
-    a_samples = 10.0 ** log10_a_samples
+    a_samples   = 10.0 ** np.where(np.isfinite(log10_a_samples),
+                                    log10_a_samples, np.nan)
 
     results = dict(
         samples=samples,
@@ -501,6 +635,10 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         autocorr_time=tau_int,
         template_mode=template_mode,
         template_tag=template_tag,
+        log10_a_samples=log10_a_samples,
+        analytic_log10a=not sample_log10a,
+        err_floor_frac=err_floor_frac,
+        equal_weights=equal_weights,
     )
 
     return results

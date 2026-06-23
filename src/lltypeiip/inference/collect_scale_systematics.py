@@ -19,7 +19,7 @@ DEFAULT_FITTED_GRID_DIR = PROJECT_ROOT / "fitted_grids"
 DEFAULT_MCMC_SUMMARY_DIR = PROJECT_ROOT / "mcmc_results/summaries"
 DEFAULT_OUT_DIR = PROJECT_ROOT / "results/scale"
 
-def load_mcmc_summary(mcmc_summary_dir, mode, seed=None):
+def load_mcmc_summary(mcmc_summary_dir, mode, seed=None, adhoc_oids=None):
     d = Path(mcmc_summary_dir)
     if seed is not None:
         path = d / f"mcmc_summary_{mode}_seed{seed}.csv"
@@ -36,7 +36,24 @@ def load_mcmc_summary(mcmc_summary_dir, mode, seed=None):
         return None
     
     print(f"  Loading MCMC summary: {path}")
-    return pd.read_csv(path)
+    df = pd.read_csv(path)
+
+    if adhoc_oids is not None:
+        for oid, adhoc_path in adhoc_oids.items():
+            adhoc_path = Path(adhoc_path)
+            if not adhoc_path.exists():
+                print(f"!!! Ad-hoc MCMC summary for {oid} not found: {adhoc_path}")
+                continue
+            df_adhoc = pd.read_csv(adhoc_path)
+            match = df_adhoc[df_adhoc["oid"] == oid]
+            if match.empty:
+                print(f"!!! OID {oid} not found in ad-hoc MCMC summary: {adhoc_path}")
+                continue
+            df = df[df["oid"] != oid]
+            df = pd.concat([df, match], ignore_index=True)
+            print(f"  Replaced MCMC summary for {oid} with ad-hoc run from {adhoc_path}")
+
+    return df
 
 def load_fitted_grid_best(fitted_grid_dir, mode, thickness):
     
@@ -81,12 +98,26 @@ def main():
     parser.add_argument("--template-seed", type=int, default=None)
     parser.add_argument("--bb-seed", type=int, default=None)
 
+    parser.add_argument("--use-adhoc-run", action="store_true", default=False, help="Use ad-hoc run MCMC summaries for specific OIDs")
+
     args = parser.parse_args()
+
+    ADHOC_RUN_OIDS = {
+    "ZTF21abnlhxs": DEFAULT_MCMC_SUMMARY_DIR / f"mcmc_summary_template_seed{args.template_seed}_ZTF21abnlhxs_no_i_band.csv",
+    "ZTF22aaywnyg":  DEFAULT_MCMC_SUMMARY_DIR / f"mcmc_summary_template_seed{args.template_seed}_ZTF22aaywnyg_no_i_band.csv",
+    }
 
     # load MCMC summaries
     print("Loading MCMC summaries...")
-    df_tmpl_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "template", seed=args.template_seed)
-    df_bb_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "blackbody", seed=args.bb_seed)
+    if args.use_adhoc_run:
+        print("Using ad-hoc MCMC summaries for specific OIDs:")
+        for oid, path in ADHOC_RUN_OIDS.items():
+            print(f"  {oid}: {path}")
+        df_tmpl_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "template", seed=args.template_seed, adhoc_oids=ADHOC_RUN_OIDS) if args.template_seed is not None else None
+        df_bb_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "blackbody", seed=args.bb_seed, adhoc_oids=ADHOC_RUN_OIDS) if args.bb_seed is not None else None
+    else:
+        df_tmpl_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "template", seed=args.template_seed) if args.template_seed is not None else None
+        df_bb_mcmc = load_mcmc_summary(args.mcmc_summary_dir, "blackbody", seed=args.bb_seed) if args.bb_seed is not None else None
 
     # load fitted grid best fits
     if args.include_grid:
@@ -135,10 +166,10 @@ def main():
                 ]
                 if not match.empty:
                     r = match.iloc[0]
-                    # use analytic scale at MAP — most reliable point estimate
-                    row[f"{col_base}_log10_a"] = float(np.log10(r["scale_analytic_map"])) \
-                                                    if pd.notna(r.get("scale_analytic_map")) \
-                                                    else float(r["log10_a_map"])
+                    # use sampled log10a MAP value if available, otherwise fall back on analytic log10a from MAP T_dust, tau
+                    row[f"{col_base}_log10_a"] = float(r["log10_a_map"]) \
+                                if pd.notna(r.get("log10_a_map")) \
+                                else float(np.log10(r["scale_analytic_map"]))
                     # MCMC statistical uncertainty (16-84th percentile)
                     row[f"{col_base}_log10_a_lo"] = float(r["log10_a_lo"])
                     row[f"{col_base}_log10_a_hi"] = float(r["log10_a_hi"])

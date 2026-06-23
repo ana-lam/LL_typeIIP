@@ -55,7 +55,7 @@ def load_sed(oid, sed_dir="data/tail_seds", adhoc_fix=None):
 
 def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
                                output_dir="fitted_grids", max_tstar=6000.0, adhoc_fix=None,
-                               grid_csv=None):
+                               grid_csv=None, use_weights=True):
     """
     Fit grid to SED and save summary CSV.
 
@@ -109,7 +109,7 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
         sed=sed,
         shell_thickness=thickness,
         y_mode="Flam",
-        use_weights=True,
+        use_weights=use_weights,
         max_tstar=max_tstar if mode == 'blackbody' else None
     )
 
@@ -175,7 +175,10 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
 
         resid_oid_dir = resid_mode_dir / oid
         resid_oid_dir.mkdir(parents=True, exist_ok=True)
-        resid_path = resid_oid_dir / "best_grid_fit_per_band_residuals.csv"
+        if use_weights:
+            resid_path = resid_oid_dir / "best_grid_fit_per_band_residuals.csv"
+        else:
+            resid_path = resid_oid_dir / "best_grid_fit_per_band_residuals_no_weights.csv"
 
         best = df_fitted.iloc[0]
 
@@ -205,9 +208,15 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     # save fitted grid
     if adhoc_fix is not None:
-        output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        if use_weights:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        else:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
     else:
-        output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
+        if use_weights:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
+        else:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_no_weights.csv"
     output_path = output_dir / output_filename
     
     df_fitted.to_csv(output_path, index=False)
@@ -221,7 +230,8 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     return output_path
 
-def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", adhoc_fix=None, grid_csv=None):
+def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", 
+                            adhoc_fix=None, grid_csv=None, use_weights=True):
     """
     Create combined summary CSV for multiple OIDs.
     """
@@ -232,7 +242,8 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
         try:
             # create individual fitted grid
             output_path = create_fitted_grid_summary(
-                oid, mode, thickness, sed_dir, output_dir, adhoc_fix=adhoc_fix, grid_csv=grid_csv
+                oid, mode, thickness, sed_dir, output_dir, adhoc_fix=adhoc_fix, 
+                grid_csv=grid_csv, use_weights=use_weights
             )
             
             # load the fitted results
@@ -257,10 +268,16 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
     else:
         output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
     if adhoc_fix is not None:
-        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        if use_weights:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        else:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
     else:
-        combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
-        
+        if use_weights:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
+        else:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_no_weights.csv"
+
     df_combined.to_csv(combined_path, index=False)
     print(f"\nSaved combined summary: {combined_path}")
     print(f"Total objects: {len(oids)}")
@@ -305,7 +322,9 @@ def main():
     parser.add_argument("--grid-csv", default=None,
                        help="Override grid CSV path (e.g. for appended template). "
                             "Default: determined from mode and thickness via config.")
-    
+    parser.add_argument("--no-weights", action='store_true',
+                       help="Disable weighting in the chi2 minimization (ignore flux uncertainties)")
+
     args = parser.parse_args()
 
     # thickness values
@@ -341,17 +360,27 @@ def main():
             
             if len(oids) == 1:
                 # Single object
+                if args.no_weights:
+                    print("WARNING: Weighting is disabled for chi2 minimization (ignoring flux uncertainties)")
+                    use_weights = False
+                else:
+                    use_weights = True
                 create_fitted_grid_summary(
                     oids[0], mode, thickness,
                     args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
-                    grid_csv=args.grid_csv
+                    grid_csv=args.grid_csv, use_weights=use_weights
                 )
             else:
                 # create combined summary
+                if args.no_weights:
+                    print("WARNING: Weighting is disabled for chi2 minimization (ignoring flux uncertainties)")
+                    use_weights = False
+                else:
+                    use_weights = True
                 create_combined_summary(
                     oids, mode, thickness,
                     args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
-                    grid_csv=args.grid_csv
+                    grid_csv=args.grid_csv, use_weights=use_weights
                 )
     
     print("\n" + "="*70)
