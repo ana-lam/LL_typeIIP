@@ -227,10 +227,32 @@ def _initialize_walkers(nwalkers, best, prior_config, ndim, init_mode="hybrid",
                            tdust_frac=0.15, 
                            log10_tau=0.5, 
                            log10_a=0.5)
+        
+    tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 10000.0))
+    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 2000.0))
+    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-2.0, 2.0))
+    log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
+
+    # ---- clip best to prior bounds in case grid best is at an old boundary ----
+    best = best.copy()
+    best["tdust"] = np.clip(best["tdust"],
+                            tdust_bounds[0] + 10.0,
+                            tdust_bounds[1] - 10.0)
+    best["log10_tau"] = np.clip(best["log10_tau"],
+                                log10_tau_bounds[0] + 0.1,
+                                log10_tau_bounds[1] - 0.1)
+    if "tstar" in best:
+        best["tstar"] = np.clip(best["tstar"],
+                                tstar_bounds[0] + 10.0,
+                                tstar_bounds[1] - 10.0)
+    if "log10_a" in best:
+        best["log10_a"] = np.clip(best["log10_a"],
+                                log10_a_bounds[0] + 0.1,
+                                log10_a_bounds[1] - 0.1)
 
     tstar_bounds = prior_config.get("tstar_bounds", (1000.0, 10000.0))
-    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 1500.0))
-    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-4.0, 2.0))
+    tdust_bounds = prior_config.get("tdust_bounds", (100.0, 2000.0))
+    log10_tau_bounds = prior_config.get("log10_tau_bounds", (-2.0, 2.0))
     log10_a_bounds = prior_config.get("log10_a_bounds", (-20.0, 0.0))
 
     def draw_around():
@@ -428,8 +450,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
             (-20.0, 0.0)
         )
         prior_config = dict(
-            tdust_bounds=(50., 1500.),
-            log10_tau_bounds=(-4., 2.),
+            tdust_bounds=(50., 2000.),
+            log10_tau_bounds=(-2., 2.),
             log10_a_bounds=log10_a_bounds,
             best=best,
             prior_mode=posterior_mode,
@@ -454,8 +476,8 @@ def run_mcmc_for_sed(sed, grid_df, dusty_file_dir, workdir,
         )
         prior_config = dict(
             tstar_bounds=(2000., 12000.),
-            tdust_bounds=(100., 1500.),
-            log10_tau_bounds=(-4., 2.),
+            tdust_bounds=(100., 2000.),
+            log10_tau_bounds=(-2., 2.),
             log10_a_bounds=log10_a_bounds,
             best=best,
             prior_mode=posterior_mode,

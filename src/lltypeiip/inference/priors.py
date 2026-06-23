@@ -18,8 +18,8 @@ def _log_mix(lnN, w):
     return np.logaddexp(np.log(w) + lnN, np.log(1.0 - w))
 
 def log_prior(theta, tstar_bounds=(1000., 10000.), #1000, 10000.
-              tdust_bounds=(100., 1500.),
-              log10_tau_bounds=(-4, 2.),
+              tdust_bounds=(100., 2000.),
+              log10_tau_bounds=(-2., 2.),
               log10_a_bounds=(-20., 0.),
               best=None, prior_mode="data", 
               tstar_sigma_frac=None, tdust_sigma_frac=None,
