@@ -6,12 +6,9 @@ def integrate_Fbol_from_lamFlam(lam_um, lamFlam, scale=1.0):
     """
     Compute bolometric flux by integrating lamFlam over lam_um.
     """
-
     lamFlam_scaled = lamFlam * scale
     lam_cm = lam_um * 1e-4
-    
-    F_bol = np.trapz(lamFlam_scaled, np.log(lam_cm))
-
+    F_bol = np.trapezoid(lamFlam_scaled, np.log(lam_cm))
     return F_bol #<- same as a, honestly redundant function integral(Flam dlam)=1
 
 def luminosity_distance_cm(z):

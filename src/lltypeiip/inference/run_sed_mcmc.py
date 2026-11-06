@@ -20,6 +20,19 @@ from alerce.core import Alerce
 default_workdir = config.dusty.workdir_mcmc_dir
 default_outdir  = getattr(config.paths, "mcmc_results_dir", str(PROJECT_ROOT / "mcmc_results"))
 
+def _load_spectrum(spectrum_path, z=0.0):
+    """Load a .flm spectrum, de-redshift, and package for MCMC fitting."""
+    data = np.loadtxt(spectrum_path, comments="#")
+    wl_obs = data[:, 0]
+    flux = data[:, 1] * 1e-15  # -> erg/s/cm^2/A (de Jaeger et al. 2019 convention)
+
+    wl_rest_A = wl_obs / (1 + z)
+    wl_rest_um = wl_rest_A * 1e-4
+    lamFlam = wl_rest_A * flux  # lambda * F_lambda, matches model.lamFlam units
+
+    order = np.argsort(wl_rest_um)
+    return {"lam_um": wl_rest_um[order], "flux": lamFlam[order]}
+
 def parse_args():
 
     p = argparse.ArgumentParser(description="Run DUSTY MCMC for SN SED")
@@ -41,6 +54,15 @@ def parse_args():
                help="Pre-fitted grid CSV (from fit_grids.py). "
                     "If provided, skips re-fitting and uses this directly.")
     p.add_argument("--tstar-dummy", type=float, default=6000.0)
+
+    p.add_argument("--template-kind", type=str, default="auto",
+               choices=["auto", "series", "single_spectrum"],
+               help="'series' for Nugent-style multi-phase grid file, "
+                    "'single_spectrum' for a single .flm spectrum, "
+                    "'auto' infers from file extension.")
+    p.add_argument("--spectrum-z", type=float, default=0.0,
+                help="Redshift for de-redshifting a single-spectrum template "
+                        "(only used when template-kind=single_spectrum).")
 
     # optionally load one saved sed pickle instead of rebuilding
     p.add_argument("--sed-pkl", type=str, default=None,
@@ -96,6 +118,26 @@ def parse_args():
                    help="Fractional error floor to add in quadrature to observed flux uncertainties. Default: 0.0 (no error floor)")
     p.add_argument("--equal-weights", action="store_true", default=False,
                    help="Use equal weights for all data points in chi2")
+    p.add_argument("--quadratic-weights", action="store_true", default=False,
+                   help="Use quadratic weights for chi2 (adds error floor in quadrature)")
+
+    # spectrum fitting
+    p.add_argument("--spectrum-path", type=str, default=None,
+               help="Optional path to a .flm spectrum to include in the MCMC "
+                    "likelihood alongside photometry (template mode only).")
+    p.add_argument("--spectrum-fit-z", type=float, default=0.0,
+                help="Redshift for de-redshifting --spectrum-path before "
+                        "fitting (distinct from --spectrum-z, which is for "
+                        "single_spectrum template mode).")
+    p.add_argument("--spectrum-err-floor-frac", type=float, default=0.1,
+                help="Fractional error floor per spectral bin.")
+    p.add_argument("--spectrum-weight-scale", type=float, default=1.0,
+               help="Multiplier on the spectral term's contribution to the "
+                    "GRID-SEEDING fit only (fit_grid_to_sed). The actual MCMC "
+                    "likelihood automatically rebalances W1/W2/spectrum to "
+                    "contribute equally via compute_group_weight_scales() and "
+                    "does not use this value.")
+
 
     return p.parse_args()
 
@@ -174,6 +216,11 @@ def main():
     if template_mode:
         print(f"Template mode phase_days={sed.get('phase_days')} template={args.template_tag}")
 
+    spectrum = None
+    if args.spectrum_path is not None:
+        print(f"Loading spectrum from {args.spectrum_path} (z={args.spectrum_fit_z})...")
+        spectrum = _load_spectrum(args.spectrum_path, z=args.spectrum_fit_z)
+
     # grid fitting
     if args.fitted_grid_csv is not None:
         fitted_csv = Path(args.fitted_grid_csv).resolve()
@@ -198,7 +245,9 @@ def main():
             template_tag=args.template_tag if template_mode else None,
             y_mode="Flam",
             use_weights=True,
-            top_k=None
+            top_k=None,
+            spectrum=spectrum,
+            spectrum_err_floor_frac=args.spectrum_err_floor_frac,
         )
     else:
         raise RuntimeError("Requires either --grid-csv or --fitted-grid-csv")
@@ -251,6 +300,8 @@ def main():
             shell_thickness=shell_thickness,
             template_path=(args.template_path if template_mode else None),
             template_tag=args.template_tag if template_mode else None,
+            template_kind=args.template_kind,
+            spectrum_z=args.spectrum_z,
             tstar_dummy=float(args.tstar_dummy),
             nwalkers=args.nwalkers,
             nsteps=args.nsteps,
@@ -271,6 +322,9 @@ def main():
             log10_a_range=args.log10a_range,
             err_floor_frac=args.err_floor_frac,
             equal_weights=args.equal_weights,
+            quadratic_weights=args.quadratic_weights,
+            spectrum=spectrum,
+            spectrum_err_floor_frac=args.spectrum_err_floor_frac,
             **mode_kwargs[mode],
         )
 
@@ -317,7 +371,11 @@ def main():
             shell_thickness=shell_thickness,
             evaluator_mode=results.get("evaluator_mode", "dusty"),
             err_floor_frac=args.err_floor_frac,
-            equal_weights=args.equal_weights
+            equal_weights=args.equal_weights,
+            quadratic_weights=args.quadratic_weights,
+            spectrum_path=str(args.spectrum_path) if args.spectrum_path else "",
+            spectrum_err_floor_frac=args.spectrum_err_floor_frac,
+            group_weight_scales=str(results.get("group_weight_scales")),
         )
         
         print(f"Saved results to: {outpath}")

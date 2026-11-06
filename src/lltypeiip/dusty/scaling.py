@@ -11,72 +11,198 @@ def compute_chi2(lam_um, lamFlam, sed, a=None, y_mode="Flam", use_weights=True):
     """
     Compute chi-squared for a DUSTY model with a provided scale factor ``a``.
     Use ``fit_scale_to_sed`` first if you need to determine the best-fit scale.
-    """
+"""
     if a is None:
         raise ValueError("compute_chi2 requires a scale factor 'a'; call fit_scale_to_sed first.")
 
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
-    
+
     if y_mode == "Flam":
         x_mod = lam_um
         y_mod = lamFlam * a
-        
+
         # overlap in x
         mask_data = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
         x_data = x_sed[mask_data]
         y_data = y_sed[mask_data]
         ey_data = ey_sed[mask_data]
-        
+
         if len(x_data) == 0:
             return a, np.inf
-        
+
         # interpolate model onto observed wavelengths
         y_mod_on_data = np.interp(x_data, x_mod, y_mod)
-        
+
     elif y_mode == "Fnu":
         lam_cm = lam_um * 1e-4
         nu_mod = const.c.cgs.value / lam_cm  # Hz
         Fnu_mod = (lamFlam * a) * (lam_cm / const.c.cgs.value)
-        
+
         order = np.argsort(nu_mod)
         nu_mod = nu_mod[order]
         Fnu_mod = Fnu_mod[order]
-        
+
         # overlap in x
         mask_data = (x_sed >= nu_mod.min()) & (x_sed <= nu_mod.max())
         x_data = x_sed[mask_data]
         y_data = y_sed[mask_data]
         ey_data = ey_sed[mask_data]
-        
+
         if len(x_data) == 0:
             return a, np.inf
-        
+
         # interpolate model onto observed wavelengths
         y_mod_on_data = np.interp(x_data, nu_mod, Fnu_mod)
-    
+
     else:
         raise ValueError("y_mode must be 'Flam' or 'Fnu'")
-    
+
     if use_weights and np.any(ey_data > 0):
         weights = 1.0 / np.clip(ey_data, 1e-99, np.inf)**2
         chi2 = np.sum(weights * (y_data - y_mod_on_data)**2)
     else:
         chi2 = np.sum((y_data - y_mod_on_data)**2)
-    
+
     return a, float(chi2)
 
 
-def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
+def bin_spectrum_to_model_grid(lam_model_um, lam_spec_um, flux_spec):
+    """
+    Bins spectrum onto DUSTY's coarser model grid,
+    averaging over +/- local_bin_width/2 around each model wavelength point
+    """
+
+    lam_model_um = np.asarray(lam_model_um, dtype=float)
+    lam_spec_um = np.asarray(lam_spec_um, dtype=float)
+    flux_spec = np.asarray(flux_spec, dtype=float)
+
+    order = np.argsort(lam_model_um)
+    lam_sorted = lam_model_um[order]
+
+    bin_edges = np.empty(len(lam_sorted) + 1)
+    bin_edges[1:-1] = 0.5 * (lam_sorted[:-1] + lam_sorted[1:])
+    bin_edges[0] = lam_sorted[0] - (bin_edges[1] - lam_sorted[0])
+    bin_edges[-1] = lam_sorted[-1] + (lam_sorted[-1] - bin_edges[-2])
+
+    binned_flux_sorted = np.full(len(lam_sorted), np.nan)
+    n_pix_sorted = np.zeros(len(lam_sorted), dtype=int)
+
+    for i in range(len(lam_sorted)):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        mask = (lam_spec_um >= lo) & (lam_spec_um < hi) & np.isfinite(flux_spec)
+        if np.any(mask):
+            binned_flux_sorted[i] = np.mean(flux_spec[mask])
+            n_pix_sorted[i] = np.sum(mask)
+
+    binned_flux = np.empty_like(binned_flux_sorted)
+    n_pix = np.empty_like(n_pix_sorted)
+    binned_flux[order] = binned_flux_sorted
+    n_pix[order] = n_pix_sorted
+
+    return binned_flux, n_pix
+
+
+def compute_group_weight_scales(x_mod, y_mod, sed, spec_y_obs, spec_y_mod, spec_weight,
+                                err_floor_frac=0.1, equal_weights=True,
+                                target_fractions=None):
+    """
+    Compute rescaling factors so that W1, W2, and the spectrum contribute
+    according to target_fractions (default: equal 1/3 each) to the total
+    denominator in the analytic scale solve.
+
+    target_fractions : dict or None
+        e.g. {"W1": 0.45, "W2": 0.45, "spectrum": 0.1} to deliberately
+        down-weight the spectrum's influence relative to strict equal
+        weighting. Must sum to 1.0 (not strictly enforced, but should).
+        Default None -> equal weighting (1/3 each).
+    """
+    x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode="Flam")
+    bands = np.array(sed["bands"])
+    is_ul = np.array(sed.get("is_ul", np.zeros(len(x_sed), dtype=bool)))
+
+    mask_data = (x_sed >= x_mod.min()) & (x_sed <= x_mod.max())
+    det_mask = mask_data & ~is_ul & np.isfinite(ey_sed) & (ey_sed > 0)
+
+    den_by_band = {}
+    for band in ["W1", "W2"]:
+        band_mask = det_mask & (bands == band)
+        if not np.any(band_mask):
+            den_by_band[band] = 0.0
+            continue
+        y_det = y_sed[band_mask]
+        ey_det = ey_sed[band_mask]
+        if equal_weights:
+            ey_det = err_floor_frac * y_det
+        else:
+            ey_det = np.maximum(ey_det, err_floor_frac * y_det)
+        y_mod_det = np.interp(x_sed[band_mask], x_mod, y_mod)
+        w = 1.0 / np.clip(ey_det, 1e-99, np.inf) ** 2
+        den_by_band[band] = np.sum(w * y_mod_det ** 2)
+
+    den_spec = np.sum(spec_weight * spec_y_mod ** 2) if spec_y_mod is not None else 0.0
+
+    raw = {"W1": den_by_band.get("W1", 0.0),
+           "W2": den_by_band.get("W2", 0.0),
+           "spectrum": den_spec}
+
+    if target_fractions is None:
+        target_fractions = {"W1": 1/3, "W2": 1/3, "spectrum": 1/3}
+
+    # total denominator we want AFTER rescaling: pick an arbitrary reference
+    # (sum of raw contributions), then allocate that total according to
+    # target_fractions rather than forcing every group to the same value
+    total_raw = sum(v for v in raw.values() if v > 0)
+
+    scales = {}
+    for k, v in raw.items():
+        target_v = target_fractions.get(k, 0.0) * total_raw
+        scales[k] = (target_v / v) if v > 0 else 0.0
+
+    return scales, raw
+
+
+def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True, spectrum=None,
+                    equal_weights=False, quadratic_weights=False, err_floor_frac=0.1,
+                    spectrum_weight_mode="err_floor", spectrum_err_floor_frac=0.1,
+                    equal_group_weights=True, target_fractions=None):
     """
     Find best-fit scale factor for DUSTY model to match SED using least-squares.
+
+    spectrum : dict or None
+        Optional. {"lam_um": array, "flux": array} of an observed spectrum,
+        de-redshifted to rest frame, in the same units as y_mode ('Flam' only
+        -- Fnu not currently supported for spectral fitting). If given, the
+        spectrum is binned onto the model's native wavelength grid (averaging
+        within each grid cell's local spacing) and included as additional
+        residual terms in the same weighted least-squares scale/chi2 solve
+        used for the photometric SED points.
+    spectrum_weight_mode : str
+        'err_floor' -- use spectrum_err_floor_frac * |binned_flux| as the
+        per-bin sigma (simple, robust default when no reliable per-pixel
+        error array is propagated through binning).
+    spectrum_err_floor_frac : float
+        Fractional error floor applied per spectral bin when
+        spectrum_weight_mode='err_floor'.
+    equal_group_weights : bool
+        If True (default) and spectrum is given, W1, W2, and the spectrum
+        are automatically rescaled to contribute equally (1/3 each) to the
+        scale/chi2 solve via compute_group_weight_scales(), rather than
+        relying on relative-error weighting alone (which gives disproportionate
+        leverage to whichever dataset has the largest raw model/obs ratio).
+        If False, falls back to plain per-point relative-error weighting with
+        no group-level rebalancing (spectrum and photometry combine with
+        whatever relative weight the per-point errors happen to produce).
     """
     x_sed, y_sed, ey_sed, _, _ = _prepare_sed_xy(sed, y_mode=y_mode)
     is_ul = np.array(sed.get("is_ul", [False] * len(sed["bands"])), dtype=bool)
+    bands = np.array(sed.get("bands", [""] * len(x_sed)))
 
     if y_mode == "Flam":
         x_mod = model.lam_um
         y_mod = model.lamFlam
     elif y_mode == "Fnu":
+        if spectrum is not None:
+            raise NotImplementedError("Spectral fitting currently only supports y_mode='Flam'.")
         lam_cm = model.lam_um * 1e-4
         nu_mod = const.c.cgs.value / lam_cm
         Fnu_mod = model.lamFlam * (lam_cm / const.c.cgs.value)
@@ -91,7 +217,8 @@ def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
     x_data  = x_sed[mask_data]
     y_data  = y_sed[mask_data]
     ey_data = ey_sed[mask_data]
-    ul_mask = is_ul[mask_data] 
+    ul_mask = is_ul[mask_data]
+    bands_data = bands[mask_data]
 
     if len(x_data) == 0:
         model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
@@ -105,6 +232,7 @@ def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
     det = ~ul_mask
     x_det, y_det, ey_det = x_data[det], y_data[det], ey_data[det]
     y_mod_det = y_mod_on_data[det]
+    bands_det = bands_data[det]
 
     if len(y_det) == 0:
         model.scale, model.chi2, model.dof, model.chi2_red = np.nan, np.inf, 0, np.inf
@@ -112,40 +240,104 @@ def fit_scale_to_sed(model, sed, y_mode="Flam", use_weights=True):
         model.n_ul_active = 0
         return model
 
+    # --- bin spectrum onto model grid, if provided ---
+    spec_y_mod = None
+    spec_y_obs = None
+    spec_weight = None
+    if spectrum is not None:
+        if y_mode != "Flam":
+            raise ValueError("spectrum fitting only supported for y_mode='Flam'")
+        binned_flux, n_pix = bin_spectrum_to_model_grid(
+            x_mod, spectrum["lam_um"], spectrum["flux"])
+        covered = np.isfinite(binned_flux) & (n_pix > 0)
+
+        spec_y_obs = binned_flux[covered]
+        spec_y_mod = y_mod[covered]
+
+        if spectrum_weight_mode == "err_floor":
+            sigma_spec = spectrum_err_floor_frac * np.clip(np.abs(spec_y_obs), 1e-99, np.inf)
+        else:
+            raise ValueError(f"Unknown spectrum_weight_mode: {spectrum_weight_mode}")
+
+        spec_weight = 1.0 / sigma_spec ** 2
+
+    if use_weights and err_floor_frac > 0.0:
+        if equal_weights:
+            # ignore real errors entirely; every point weighted purely by its own flux
+            ey_det = err_floor_frac * y_det
+        elif quadratic_weights:
+            # combine REAL reported error with the floor in quadrature
+            ey_det = np.sqrt(ey_det**2 + (err_floor_frac * y_det)**2)
+        else:
+            ey_det = ey_det
+
     if use_weights and np.any(ey_det > 0):
-        w = 1.0 / np.clip(ey_det, 1e-99, np.inf)**2
-        a = np.sum(w * y_det * y_mod_det) / np.sum(w * y_mod_det**2)
-        chi2_det = np.sum(w * (y_det - a * y_mod_det)**2)
+        w_phot = 1.0 / np.clip(ey_det, 1e-99, np.inf) ** 2
     else:
-        a = np.sum(y_det * y_mod_det) / np.sum(y_mod_det**2)
-        chi2_det = np.sum((y_det - a * y_mod_det)**2)
+        w_phot = np.ones_like(y_det)
+
+    # --- group-level equal weighting (W1, W2, spectrum each 1/3) ---
+    group_scales = None
+    raw_contributions = None
+    if spectrum is not None and equal_group_weights:
+        group_scales, raw_contributions = compute_group_weight_scales(
+            x_mod, y_mod, sed, spec_y_obs, spec_y_mod, spec_weight,
+            err_floor_frac=spectrum_err_floor_frac, equal_weights=use_weights,
+            target_fractions=target_fractions,
+        )
+        band_scale = np.array([group_scales.get(b, 1.0) for b in bands_det])
+        w_phot = w_phot * band_scale
+
+    spec_scale = group_scales.get("spectrum", 1.0) if group_scales else 1.0
+
+    num = np.sum(w_phot * y_det * y_mod_det)
+    den = np.sum(w_phot * y_mod_det ** 2)
+
+    if spec_y_mod is not None:
+        num += spec_scale * np.sum(spec_weight * spec_y_obs * spec_y_mod)
+        den += spec_scale * np.sum(spec_weight * spec_y_mod ** 2)
+
+    a = num / den
+
+    chi2_det = np.sum(w_phot * (y_det - a * y_mod_det) ** 2)
+    n_spec_used = 0
+    chi2_spec = 0.0
+
+    if spec_y_mod is not None:
+        chi2_spec = spec_scale * np.sum(spec_weight * (spec_y_obs - a * spec_y_mod) ** 2)
+        n_spec_used = len(spec_y_obs)
 
     # UL penalities
     y_mod_ul = a * y_mod_on_data[ul_mask]
     y_ul = y_data[ul_mask]
 
-    sigma_ul = y_ul / 3.0 # recover error
+    sigma_ul = y_ul / 3.0  # recover error
 
     exceeded = y_mod_ul > y_ul
     excess = y_mod_ul - y_ul
-    chi2_ul = np.sum((excess[exceeded] / sigma_ul[exceeded])**2)
+    chi2_ul = np.sum((excess[exceeded] / sigma_ul[exceeded]) ** 2)
     n_ul_active = int(np.sum(exceeded))
 
-    chi2 = chi2_det + chi2_ul
-    dof = max(len(y_det) + n_ul_active - 1, 0)
+    chi2 = chi2_det + chi2_ul + chi2_spec
+    dof = max(len(y_det) + n_ul_active + n_spec_used - 1, 0)
 
     model.scale = float(a)
     model.chi2 = float(chi2)
     model.dof = int(dof)
     model.chi2_red = float(chi2 / dof) if dof > 0 else np.inf
     model.n_ul_active = n_ul_active
+    model.n_spec_used = n_spec_used
+    model.group_weight_scales = group_scales
+    model.group_raw_contributions = raw_contributions
     model.x_plot = x_mod
     model.y_scaled = a * y_mod
 
     return model
 
-def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weights=True,
-                    template_tag=None, top_k=None, max_tstar=6000.0):
+
+def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weights=True, quadratic_weights=False,
+                    template_tag=None, top_k=None, max_tstar=6000.0, spectrum=None,
+                    spectrum_err_floor_frac=0.1, equal_group_weights=True, target_fractions=None):
     """
     Fitting function for both blackbody and template grids.
 
@@ -158,25 +350,31 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
     shell_thickness : float or None
         Shell thickness to filter by. If None, uses all models in CSV.
     y_mode : str
-        'Flam' or 'Fnu' 
+        'Flam' or 'Fnu'
     use_weights : bool
         Whether to use SED uncertainties as weights in fitting.
     template_tag : str or None
-        If fitting a template grid, filter by this template_tag value. 
+        If fitting a template grid, filter by this template_tag value.
     top_k : int or None
         Only load and fit top K models from CSV.
-    
+    spectrum : dict or None
+        Optional observed spectrum to include alongside photometry -- see
+        fit_scale_to_sed for details.
+    equal_group_weights : bool
+        If True (default), W1/W2/spectrum are rebalanced to contribute
+        equally to each model's fit. See fit_scale_to_sed.
+
     Returns
     -------
     DataFrame
-        DataFrame with fit results sorted by chi2_red, including a '_models' 
+        DataFrame with fit results sorted by chi2_red, including a '_models'
         attribute mapping folders to DustyModel instances.
     """
 
     grid_csv = Path(grid_csv)
     if not grid_csv.exists():
         raise FileNotFoundError(f"Grid CSV file not found: {grid_csv}")
-    
+
     is_template = "template" in grid_csv.name or 'nugent' in grid_csv.name
 
     # load models from csv
@@ -184,7 +382,7 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
         oid = sed.get('oid', None)
         if oid is None:
             raise ValueError("SED dictionary must contain 'oid' key for template grid fitting")
-        
+
         if template_tag is None:
             # infer tag from the CSV rather than hardcoding
             import pandas as _pd
@@ -209,7 +407,7 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
 
     if shell_thickness is not None:
         models = [m for m in models if np.isclose(m.shell_thickness, shell_thickness, atol=0.01)]
-    
+
     if not is_template and max_tstar is not None:
         n_before = len(models)
         models = [m for m in models if m.Tstar <= max_tstar]
@@ -219,7 +417,7 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
 
     if not models:
         raise RuntimeError(
-            f"No models found in {grid_csv}" + 
+            f"No models found in {grid_csv}" +
             (f" for shell_thickness={shell_thickness}" if shell_thickness else "") +
             (f" and oid={sed.get('oid')}" if is_template else "")
         )
@@ -229,11 +427,30 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
     model_map = {}
     oid_for_output = sed.get('oid', 'unknown')
 
+    printed_group_scales = False
+
+    equal_weights=False
+    if use_weights is False:
+        use_weights=True
+        equal_weights=True
+
     for m in models:
-        fit_scale_to_sed(m, sed, y_mode=y_mode, use_weights=use_weights)
-        
+        fit_scale_to_sed(
+            m, sed, y_mode=y_mode, use_weights=use_weights, 
+            equal_weights=equal_weights, quadratic_weights=quadratic_weights,
+            err_floor_frac=0.1,
+            spectrum=spectrum, spectrum_err_floor_frac=spectrum_err_floor_frac,
+            equal_group_weights=equal_group_weights,
+            target_fractions=target_fractions,
+        )
+
+        if spectrum is not None and not printed_group_scales and getattr(m, "group_weight_scales", None):
+            print(f"[group weights] raw denominator contributions: {m.group_raw_contributions}")
+            print(f"[group weights] rebalancing scales for equal (1/3-1/3-1/3) weighting: {m.group_weight_scales}")
+            printed_group_scales = True
+
         row = dict(
-            folder=str(m.folder), 
+            folder=str(m.folder),
             oid=oid_for_output,
             tdust=m.Tdust,
             tau=m.tau,
@@ -249,20 +466,22 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
             row['npz_path'] = m.npz_path
         if m.outpath is not None:
             row['outpath'] = m.outpath
-        
+
         if not is_template:
             row['tstar'] = m.Tstar
         if is_template:
             row['tstar_dummy'] = m.Tstar  # placeholder for template grids
             row['phase_days'] = m.phase_days
             row['template_tag'] = m.template_tag
-        
+
+        row["n_spec_used"] = getattr(m, "n_spec_used", 0)
+
         rows.append(row)
         model_map[str(m.folder)] = m
-    
+
     # create DataFrame and sort by chi2_red
     df = pd.DataFrame(rows).sort_values("chi2_red").reset_index(drop=True)
-    
+
     df.attrs["models"] = model_map
 
     best_model_folder = df.iloc[0]['folder']
@@ -271,6 +490,7 @@ def fit_grid_to_sed(grid_csv, sed, shell_thickness=None, y_mode="Flam", use_weig
     df.attrs["best_model_residuals"] = df_resid
 
     return df
+
 
 def sed_residuals(model, sed, y_mode="Flam", print_table=True):
     """Compute per-band residuals for a fitted model and return a DataFrame."""

@@ -196,11 +196,11 @@ def main():
                     7000, 7500, 8000, 8500, 9000, 9500, 10000]
 
     # Inner dust temperature (K): warm silicate near sublimation
-    tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
+    tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]
 
     # Optical depth at V-band: thin -> moderate (avoid extreme thickness with only 4 bands)
     # (log-spaced with a bit more density at thin end)
-    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.5, 0.7, 1.0, 1.2, 1.5, 1.7, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0]
 
     # Thickness (R_out / R_in)
     shell_thickness_values = [2.0]

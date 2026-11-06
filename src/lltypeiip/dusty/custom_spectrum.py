@@ -28,6 +28,49 @@ class NugentIIPSeries:
         # reshape fluxes into (nt, nl) for time x wavelength
         self.f_grid = arr[:, 2].reshape((nt, nl))
     
+    @classmethod
+    def from_single_spectrum(cls, flm_path, z=0.0, time_lo=-9999.0, time_hi=9999.0):
+        """
+        Build a phase-independent 'series' directly from a single flux-calibrated
+        .flm spectrum (wl(A), flm, [err])
+
+        The spectrum is de-redshifted to rest frame and duplicated across two
+        bracketing time values (time_lo, time_hi), so spectrum_at(phase_days)
+        returns this same spectrum for any requested phase -- either by clamping
+        (phase outside [time_lo, time_hi]) or by interpolating between two
+        identical arrays (phase inside the range).
+
+        Parameters
+        ----------
+        flm_path : str or Path
+            Path to the .flm spectrum file.
+        z : float
+            Redshift used to de-redshift wl -> rest frame.
+        time_lo, time_hi : float
+            Bracketing phase values written internally; pick a range wide
+            enough to cover every phase_days you'll ever query.
+        """
+        obj = cls.__new__(cls)
+
+        data = np.loadtxt(flm_path, comments="#")
+        wl_obs = data[:, 0]
+        flux = data[:, 1] * 1e-15  # -> erg/s/cm^2/A (de Jaeger et al. 2019 convention)
+
+        wl_rest = wl_obs / (1 + z)
+
+        order = np.argsort(wl_rest)
+        wl_rest = wl_rest[order]
+        flux = flux[order]
+        wl_rest, unique_idx = np.unique(wl_rest, return_index=True)
+        flux = flux[unique_idx]
+
+        obj.times = np.array([time_lo, time_hi])
+        obj.lam_A = wl_rest
+        obj.f_grid = np.vstack([flux, flux])  # identical spectrum at both times
+
+        return obj
+
+
     @property
     def lam_um(self):
         return self.lam_A * 1e-4  # convert Angstroms to microns

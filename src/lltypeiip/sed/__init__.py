@@ -7,6 +7,7 @@ from .build import (
     _sed_has_required_detections,
     _prepare_sed_xy,
     _unwrap_sed,
+    adhoc_build_multi_epoch_seds_from_tail
 )
 
 from .plotting import (
@@ -26,4 +27,5 @@ __all__ = [
     '_unwrap_sed',
     # Plotting functions
     'plot_sed',
+    'adhoc_build_multi_epoch_seds_from_tail'
 ]
