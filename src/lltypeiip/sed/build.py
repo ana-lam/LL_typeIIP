@@ -286,7 +286,6 @@ def build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
 
     all_epochs = _wise_anchored_epochs(wise_resdict, t_tail, snr_min_wise=snr_min_wise,
                                             merge_dt=merge_dt, first_wise_only=first_wise_only)
-    
     if all_epochs.size == 0:
         print(f". No WISE detections found after tail start (MJD={t_tail:.1f}) for {oid}")
         return []
@@ -567,7 +566,6 @@ def build_sed(mjd0, ztf_resdict, wise_resdict, max_dt_ztf=1.0, max_dt_wise=1.0,
                 sed["eFnu"].append(np.nan)
                 sed["is_ul"].append(True)
                 sed["dt_labels"].append(f"Δt={t_ul-mjd0:+.2f} d (3σ UL)")
-
     # WISE
     for b in ["W1","W2"]:
         tkey, fkey, ekey = wise_map[b]
@@ -647,3 +645,130 @@ def _prepare_sed_xy(sed, y_mode="Fnu"):
         raise ValueError("y_mode must be 'Fnu' or 'Flam'.")
 
     return x, y, ey, x_label, y_label
+
+
+def adhoc_build_multi_epoch_seds_from_tail(ztf_resdict, wise_resdict, max_dt_ztf=4.0,
+                                           max_dt_wise=1.0, include_limits=True, snr_min=SNR_MIN,
+                                           snr_min_wise=SNR_MIN_WISE, csv_path=config.paths.params,
+                                           tail_offset_days=0.0, merge_dt=1.0,
+                                           min_detected_bands=2, include_plateau_epoch=True,
+                                           trim_to_n_det=None, trim_min_dt=3.0):
+    """
+    Variant of build_multi_epoch_seds_from_tail that anchors candidate SED
+    epochs on ZTF tail-phase detections instead of requiring a WISE detection
+    to exist at all. build_sed's own nearest-detection/nearest-UL fallback
+    logic (unchanged, reused as-is) then correctly populates W1/W2 as upper
+    limits when no significant WISE detection falls within max_dt_wise.
+
+    The original build_multi_epoch_seds_from_tail can never produce SEDs for
+    objects with zero significant WISE detections after t_tail, because
+    _wise_anchored_epochs (its epoch source) only returns WISE DETECTION
+    times - require_wise_detection there only gates ACCEPTANCE of an epoch
+    already anchored on a WISE detection, it never lets a non-WISE-detected
+    object past epoch generation in the first place.
+    """
+    oid = ztf_resdict.get("oid")
+    ztf_forced = ztf_resdict['forced']
+
+    params_df = pd.read_csv(csv_path)
+    m = params_df[['name', 'plateauend', 'tailstart']].dropna()
+    if include_plateau_epoch:
+        m_dict_plateauend = dict(zip(m['name'].astype(str), m['plateauend'].astype(float)))
+        m_dict_tailstart = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
+        delta_days = (m_dict_tailstart[oid] - m_dict_plateauend[oid]
+                     if oid in m_dict_plateauend and oid in m_dict_tailstart else None)
+        if delta_days is not None and delta_days > 0:
+            t_tail = m_dict_plateauend[oid] + delta_days / 2
+        else:
+            t_tail = m_dict_tailstart.get(oid)
+    else:
+        m_dict = dict(zip(m['name'].astype(str), m['tailstart'].astype(float)))
+        t_tail = m_dict.get(oid)
+
+    if t_tail is None:
+        print(f"  No plateau/tail-start info for {oid}, skipping")
+        return []
+
+    t_tail = t_tail + float(tail_offset_days)
+
+    # --- candidate epochs from ZTF tail-phase detections (NOT WISE) ---
+    all_epochs = _ztf_anchored_epochs(ztf_forced, t_tail, snr_min=snr_min, merge_dt=merge_dt)
+    if all_epochs.size == 0:
+        print(f"  No ZTF tail-phase detections found after t_tail (MJD={t_tail:.1f}) for {oid}")
+        return []
+
+    print(f"  ZTF-anchored candidate epochs for {oid}: {all_epochs}")
+
+    t_exp_info = estimate_texp_mjd_from_forced(ztf_forced)
+    t_exp_mjd = t_exp_info['t_exp_mjd'] if t_exp_info else None
+    t_exp_sig = t_exp_info['sigma_mjd'] if t_exp_info else None
+    t_exp_band = t_exp_info['band'] if t_exp_info else None
+
+    seds = []
+    for mjd0 in all_epochs:
+        sed = build_sed(mjd0, ztf_resdict, wise_resdict,
+                        max_dt_ztf=max_dt_ztf, max_dt_wise=max_dt_wise,
+                        include_limits=include_limits, snr_min=snr_min,
+                        snr_min_wise=snr_min_wise)
+        sed["ztf_anchor_mjd"] = float(mjd0)
+        sed["t_exp_mjd"] = t_exp_mjd
+        sed["t_exp_sig"] = t_exp_sig
+        sed["t_exp_band"] = t_exp_band
+        sed["phase_days"] = (mjd0 - t_exp_mjd) if t_exp_mjd is not None else np.nan
+
+        if trim_to_n_det is not None:
+            sed = _trim_ztf_detections(sed, max_n_det=trim_to_n_det, trim_min_dt=trim_min_dt)
+
+        ztf_dts = []
+        for band, ul, label in zip(sed["bands"], sed["is_ul"], sed["dt_labels"]):
+            if band.startswith("ZTF") and not ul:
+                try:
+                    ztf_dts.append(float(label.split("=")[1].split(" ")[0]))
+                except (IndexError, ValueError):
+                    pass
+        sed["max_dt_ztf_actual"] = float(np.max(np.abs(ztf_dts))) if ztf_dts else np.nan
+
+        bands_arr = np.array(sed["bands"])
+        is_ul_arr = np.array(sed["is_ul"])
+        wise_mask = np.isin(bands_arr, ["W1", "W2"])
+        sed["wise_status"] = ("no_wise_epoch" if not np.any(wise_mask)
+                              else "detection" if np.any(~is_ul_arr[wise_mask])
+                              else "nondetection")
+
+        # reuse the EXISTING acceptance helper - require_wise_detetection=False here means
+        # "WISE optional", matching the original function's own naming/spelling
+        
+        print(sed['bands'])
+        if sed["bands"] and _sed_has_required_detections(
+                sed, require_wise_detetection=False, min_detected_bands=min_detected_bands):
+            seds.append(sed)
+            print(f"  Accepted SED at MJD={mjd0:.2f} | bands={sed['bands']} | "
+                  f"wise_status={sed['wise_status']} | "
+                  f"max_dt_ztf_actual={sed['max_dt_ztf_actual']:.2f} d")
+
+    return seds
+
+
+def _ztf_anchored_epochs(ztf_forced, t_tail, snr_min=SNR_MIN, merge_dt=1.0, bands=("ZTF_r", "ZTF_g", "ZTF_i")):
+    """
+    Build candidate SED epochs anchored on ZTF tail-phase detection times,
+    with no dependence on WISE detection status. Use this for objects where
+    you want a SED regardless of whether WISE sees anything.
+    """
+    all_times = []
+    for band in bands:
+        if band not in ztf_forced:
+            continue
+        data = ztf_forced[band]
+        t = _det_times(data["mjd"], data.get("flux_mJy", data["flux"]),
+                        data.get("flux_err_mJy", data["flux_err"]), snr_min)
+        all_times.append(t[t > t_tail])
+
+    if not all_times:
+        return np.array([])
+
+    all_ztf = np.unique(np.concatenate(all_times))
+    if all_ztf.size == 0:
+        return np.array([])
+
+    return _merge_epochs(all_ztf, merge_dt=merge_dt)

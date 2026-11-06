@@ -217,7 +217,7 @@ def main():
 
     model = _build_mlp(n_in=3, n_out=n_lam,
                        hidden=args.hidden, depth=args.depth).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    opt   = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=args.epochs
     )
@@ -225,16 +225,16 @@ def main():
     Xva_d = Xva.to(device)
     Yva_d = Yva.to(device)
 
-    best_val = np.inf
+    best_val  = np.inf
     best_state = None
-    t0 = time.time()
+    t0         = time.time()
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         tr_losses = []
         for Xb, Yb in tr_loader:
             Xb, Yb = Xb.to(device), Yb.to(device)
-            loss = ((model(Xb) - Yb) ** 2).mean()
+            loss    = ((model(Xb) - Yb) ** 2).mean()
             opt.zero_grad()
             loss.backward()
             opt.step()

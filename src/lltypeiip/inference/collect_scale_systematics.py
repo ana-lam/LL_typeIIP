@@ -103,7 +103,7 @@ def main():
     args = parser.parse_args()
 
     ADHOC_RUN_OIDS = {
-    "ZTF21abnlhxs": DEFAULT_MCMC_SUMMARY_DIR / f"mcmc_summary_template_seed{args.template_seed}_ZTF21abnlhxs_no_i_band.csv",
+    "ZTF21abnlhxs": DEFAULT_MCMC_SUMMARY_DIR / f"mcmc_summary_template_seed903_ZTF21abnlhxs_no_i_band.csv",
     "ZTF22aaywnyg":  DEFAULT_MCMC_SUMMARY_DIR / f"mcmc_summary_template_seed{args.template_seed}_ZTF22aaywnyg_no_i_band.csv",
     }
 

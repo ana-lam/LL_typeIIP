@@ -20,7 +20,7 @@ from .ztf import convert_ZTF_mag_mJy
 FILTER_COLORS = {1: "green", 2: "red", 3: "orange"}
 FILTER_LABELS = {1: 'g', 2: 'r', 3: 'i'}
 FILTER_MARKERS = {1: 'o', 2: 'X', 3: 'D'}
-FILTER_SIZES = {1: 30, 2: 60, 3: 90}
+FILTER_SIZES = {1: 60, 2: 60, 3: 60}
 
 
 def plot_forced_lc(resdict, oid="ZTF source", xlim=(None, None), ax=None, show=True, flux=False,

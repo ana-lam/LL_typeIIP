@@ -19,6 +19,8 @@ sed_plot:
     ZTF_i: "orange"
     W1: "navy"
     W2: "dodgerblue"
+    ATLAS_o: "#E46233"
+    ATLAS_c: "#0AB8BB"
   
   markers:
     ZTF_g: "o"
@@ -26,6 +28,8 @@ sed_plot:
     ZTF_i: "D"
     W1: "s"
     W2: "s"
+    ATLAS_o: "H"
+    ATLAS_c: "P"
   
   size: 20
 

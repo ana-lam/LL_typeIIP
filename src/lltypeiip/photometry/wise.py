@@ -10,7 +10,7 @@ def subtract_wise_parity_baseline(wise_resdict, clip_negatives=False, dt=200,
     """
     Subtract separate baselines for even/odd WISE epochs to account
     for scan-orientation systematics. Also clips negative/zero fluxes
-    for safe log-scale plotting. And rescales uncertainties by sqrt(<reduced_chisq>).
+    for safe log-scale plotting. And rescales uncertainties by reduced_chi.
 
     Parameters
     ----------
@@ -93,15 +93,14 @@ def subtract_wise_parity_baseline(wise_resdict, clip_negatives=False, dt=200,
         corrected_fluxes = fluxes.copy()
         corrected_fluxes -= per_epoch_baseline
 
-        # ---- rescale uncertainties by chi_sq->1 ----
+        # ---- rescale uncertainties by chi_sq ----
         scale_bg = 1.0
         chi2_red = np.nan
         scale_rms = 1.0
         snr_rms_rob = np.nan
 
         if rescale_uncertainties:
-            # ----- Step 1: compute reduced chi^2 of background points and rescale -----
-            # background window: [background_start, t_sn_start)
+            # ----- compute reduced chi^2 of background points and rescale -----
             bg_mask_time = m_p2
 
             if phase_aware:
@@ -142,7 +141,7 @@ def subtract_wise_parity_baseline(wise_resdict, clip_negatives=False, dt=200,
                 if verbose:
                     print(f"Post-rescaling {band.upper()} chi2_red={chi2_red:.2f}")
 
-            # ----- Step 2: compute RMS of background points and rescale -----
+            # ----- compute RMS of background points and rescale -----
             # robust RMS estimator (p84-p16)/2
             snr = corrected_fluxes[bg_mask_time] / flux_errs[bg_mask_time]
             valid = np.isfinite(snr)

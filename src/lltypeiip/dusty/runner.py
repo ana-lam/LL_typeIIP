@@ -44,7 +44,8 @@ class DustyRunner:
                  dust_type="silicate", shell_thickness=2.0,
                  tstarmin=2000., tstarmax=12000., custom_grain_distribution=False,
                  tau_wavelength_microns=0.55, blackbody=True, logger=None, quiet=True,
-                 cache_max=5000, cache_dir=None, cache_ndigits=4, use_tmp=True, run_tag=None):
+                 cache_max=5000, cache_dir=None, cache_ndigits=4, use_tmp=True, run_tag=None,
+                 floor_negative_flux=True, floor_frac=1e-8):
         
         self.base_workdir = Path(base_workdir).resolve()
         self.base_workdir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +71,10 @@ class DustyRunner:
 
         self.cache_ndigits = int(cache_ndigits)
         self.use_tmp = bool(use_tmp)
+        self.floor_negative_flux = bool(floor_negative_flux)
+        self.floor_frac = float(floor_frac)
         self.run_tag = str(run_tag) if run_tag is not None else uuid.uuid4().hex[:10]
+
 
 
         self.logger = logger
@@ -182,6 +186,12 @@ class DustyRunner:
         s = np.argsort(lam_um)
         lam_um = lam_um[s]
         f_lam = f_lam[s]
+
+        # Floor negatives
+        if self.floor_negative_flux and np.any(f_lam <= 0):
+            positive = f_lam[f_lam > 0]
+            floor = self.floor_frac * np.nanmax(positive) if positive.size else 1e-40
+            f_lam = np.maximum(f_lam, floor)
 
         # normalization
         area = np.trapezoid(f_lam, lam_um)

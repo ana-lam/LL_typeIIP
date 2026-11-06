@@ -4,6 +4,19 @@
 # --template_path "data/typeiip_spectral_templates/sn2p_flux.v1.2.dat" \
 # --sed_pickle_dir "data/tail_seds" "dusty_runs/template_grids"
 
+
+# ad hoc SN 2015C analysis
+# python -m lltypeiip.dusty.run_template_grid \
+#   --thick_list "2.0" --n_workers 4 \
+#   --template_path "sn2015C-20150724_211-ui.flm" \
+#   --template_tag "sn2015C_day224_v1" \
+#   --spectrum_z 0.0096 \
+#   --tau_list "0.001,0.003,0.01,0.03,0.1,0.3,0.5,0.7,1.0,1.5,2.0,3.0" \
+#   --tdust_list "100,200,300,400,500,700,900,1100" \
+#   --sed_pickle_dir "data/tail_seds" \
+#   "dusty_runs/sn2015C_single_spectrum_grid"
+
+
 import os
 # keep single-threaded for numerical libraries to avoid oversubscription
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -32,6 +45,7 @@ import itertools as it
 _G = {
     "template": None,
     "template_path": None,
+    "template_kind": None,
     "runner": None,
     "runner_sig": None,
 }
@@ -63,17 +77,44 @@ def make_leaf_and_key(tstar, tdust, tau, thick, phase, template_tag, ndigits=4):
     return leaf, key
 
 
-def _get_template(template_path: str):
+_G = {
+    "template": None,
+    "template_path": None,
+    "template_kind": None,
+    "runner": None,
+    "runner_sig": None,
+}
+
+
+def _get_template(template_path: str, template_kind: str = "auto", spectrum_z: float = 0.0):
     """
-    Load Nugent template once per worker process.
+    Load template once per worker process.
+
+    template_kind:
+      "series"          -> NugentIIPSeries(template_path)
+      "single_spectrum" -> NugentIIPSeries.from_single_spectrum(template_path, z=spectrum_z)
+      "auto"            -> infer from file extension: .flm -> single_spectrum, else series
     """
     global _G
     template_path = str(Path(template_path).resolve())
-    if (_G["template"] is None) or (_G["template_path"] != template_path):
-        _G["template"] = NugentIIPSeries(template_path)
-        _G["template_path"] = template_path
-    return _G["template"]
 
+    resolved_kind = template_kind
+    if resolved_kind == "auto":
+        resolved_kind = "single_spectrum" if template_path.lower().endswith(".flm") else "series"
+
+    cache_key = (template_path, resolved_kind, spectrum_z)
+    prev_key = (_G["template_path"], _G.get("template_kind"), _G.get("spectrum_z"))
+
+    if (_G["template"] is None) or (prev_key != cache_key):
+        if resolved_kind == "single_spectrum":
+            _G["template"] = NugentIIPSeries.from_single_spectrum(template_path, z=spectrum_z)
+        else:
+            _G["template"] = NugentIIPSeries(template_path)
+        _G["template_path"] = template_path
+        _G["template_kind"] = resolved_kind
+        _G["spectrum_z"] = spectrum_z
+
+    return _G["template"]
 
 def _get_runner(runner_sig: tuple, runner_kwargs: dict):
     """
@@ -92,11 +133,11 @@ def run_single_model(job):
     write sed.dat with given parameters.
     """
     (tstarval, tdustval, tauval, thick_val, phase_days, oid,
-     template_path, template_tag,
+     template_path, template_tag, template_kind, spectrum_z,
      runner_kwargs, runner_sig, ndigits) = job
     
     # Get template and runner (cached per worker)
-    template = _get_template(template_path)
+    template = _get_template(template_path, template_kind=template_kind, spectrum_z=spectrum_z)
     runner = _get_runner(runner_sig, runner_kwargs)
     
     # Canonical key for this model
@@ -170,6 +211,14 @@ def main():
                         help="Path to Nugent spectral series file (e.g. sn2p_flux.v1.2.dat).")
     parser.add_argument("--template_tag", type=str, default="nugent_iip",
                         help="Tag to record in output rows.")
+    parser.add_argument("--template_kind", type=str, default="auto",
+                        choices=["auto", "series", "single_spectrum"],
+                        help="'series' for a Nugent-style multi-phase grid file, "
+                             "'single_spectrum' for a single .flm spectrum treated as "
+                             "phase-independent, 'auto' infers from file extension.")
+    parser.add_argument("--spectrum_z", type=float, default=0.0,
+                        help="Redshift used to de-redshift a single-spectrum template "
+                             "to rest frame (only used when template_kind=single_spectrum).")
     
     # SED input
     parser.add_argument("--seds_pkl", type=str, default=None,
@@ -294,11 +343,11 @@ def main():
     if args.tdust_list:
         tdust_values = _parse_list(args.tdust_list)
     else:
-        tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]
+        tdust_values = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]
     if args.tau_list:
         tau_values = _parse_list(args.tau_list)
     else:
-        tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.5, 0.7, 1.0, 1.2, 1.5, 1.7, 2.0, 2.5, 3.0, 4.0]
+        tau_values = np.r_[1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 0.3, 0.5, 0.7, 1.0, 1.2, 1.5, 1.7, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0]
     if args.thick_list:
         thick_values = _parse_list(args.thick_list)
     else:
@@ -407,6 +456,7 @@ def main():
             jobs.append((
                 float(args.tstar_dummy), float(tdust), float(tau), float(thick), float(phase), oid,
                 str(Path(args.template_path).resolve()), args.template_tag,
+                args.template_kind, args.spectrum_z,
                 runner_kwargs, runner_sig, args.cache_ndigits
             ))
 

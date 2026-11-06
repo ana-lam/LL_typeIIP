@@ -14,6 +14,11 @@ Create fitted grid summary CSVs with chi-squared values for each SED.
     
     # Both modes, both thicknesses, all SEDs
     python -m lltypeiip.dusty.fit_grids --all --mode both --thickness both
+
+    # Fit with an observed spectrum included (W1/W2/spectrum equal-weighted
+    # automatically -- see scaling.py's compute_group_weight_scales)
+    python -m lltypeiip.dusty.fit_grids SN2015C --mode blackbody --thickness 2.0 \\
+        --spectrum-path data/sn2015C-20150724.211-ui.flm --spectrum-z 0.0096
 """
 
 import argparse
@@ -53,9 +58,25 @@ def load_sed(oid, sed_dir="data/tail_seds", adhoc_fix=None):
     
     return sed
 
+def _load_spectrum(spectrum_path, z=0.0):
+    """Load a .flm spectrum, de-redshift, and package for fit_grid_to_sed."""
+    data = np.loadtxt(spectrum_path, comments="#")
+    wl_obs = data[:, 0]
+    flux = data[:, 1] * 1e-15  # -> erg/s/cm^2/A (de Jaeger et al. 2019 convention)
+
+    wl_rest_A = wl_obs / (1 + z)
+    wl_rest_um = wl_rest_A * 1e-4
+    lamFlam = wl_rest_A * flux  # lambda * F_lambda, matches model.lamFlam units
+
+    order = np.argsort(wl_rest_um)
+    return {"lam_um": wl_rest_um[order], "flux": lamFlam[order]}
+
+
 def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
-                               output_dir="fitted_grids", max_tstar=6000.0, adhoc_fix=None,
-                               grid_csv=None, use_weights=True):
+                               output_dir="fitted_grids", max_tstar=None, adhoc_fix=None,
+                               grid_csv=None, use_weights=True, quadratic_weights=False, spectrum_path=None,
+                               spectrum_z=0.0, spectrum_err_floor_frac=0.1,
+                               equal_group_weights=True, target_fractions=None):
     """
     Fit grid to SED and save summary CSV.
 
@@ -71,6 +92,14 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
         Directory containing SED pickles
     output_dir : str
         Directory to save fitted grid summaries
+    spectrum_path : str or None
+        Optional path to an observed .flm spectrum to include in the fit
+        alongside photometry.
+    equal_group_weights : bool
+        If True (default) and a spectrum is given, W1, W2, and the spectrum
+        are automatically rebalanced to contribute equally (1/3 each) to
+        the scale/chi2 solve, rather than relying on per-point relative-error
+        weighting alone. See scaling.compute_group_weight_scales.
     
     Returns
     -------
@@ -85,6 +114,11 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     print(f"Loading SED for {oid}...")
     sed = load_sed(oid, sed_dir=sed_dir, adhoc_fix=adhoc_fix)
 
+    spectrum = None
+    if spectrum_path is not None:
+        print(f"Loading spectrum from {spectrum_path} (z={spectrum_z})...")
+        spectrum = _load_spectrum(spectrum_path, z=spectrum_z)
+
     # construct grid CSV path
     if grid_csv is None:
         grid_csv = get_grid_csv_path(mode, thickness)
@@ -93,7 +127,8 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     if not grid_csv.exists():
         raise FileNotFoundError(f"Grid CSV not found: {grid_csv}")
     
-    print(f"Fitting {mode} grid (thickness={thickness}) to {oid}...")
+    print(f"Fitting {mode} grid (thickness={thickness}) to {oid}"
+          f"{' + spectrum' if spectrum is not None else ''}...")
 
     # grab template_path
     grid_df_raw = pd.read_csv(grid_csv)
@@ -109,8 +144,13 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
         sed=sed,
         shell_thickness=thickness,
         y_mode="Flam",
+        quadratic_weights=quadratic_weights,
         use_weights=use_weights,
-        max_tstar=max_tstar if mode == 'blackbody' else None
+        max_tstar=max_tstar if mode == 'blackbody' else None,
+        spectrum=spectrum,
+        spectrum_err_floor_frac=spectrum_err_floor_frac,
+        equal_group_weights=equal_group_weights,
+        target_fractions=target_fractions,
     )
 
     df_fitted['oid'] = oid
@@ -208,15 +248,21 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     # save fitted grid
     if adhoc_fix is not None:
-        if use_weights:
-            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        if quadratic_weights:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}_quadratic_weights.csv"
         else:
-            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
+            if use_weights:
+                output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+            else:
+                output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
     else:
-        if use_weights:
-            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
+        if quadratic_weights:
+            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_quadratic_weights.csv"
         else:
-            output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_no_weights.csv"
+            if use_weights:
+                output_filename = f"{oid}_{mode}_thick{thick_str}_fitted.csv"
+            else:
+                output_filename = f"{oid}_{mode}_thick{thick_str}_fitted_no_weights.csv"
     output_path = output_dir / output_filename
     
     df_fitted.to_csv(output_path, index=False)
@@ -230,8 +276,9 @@ def create_fitted_grid_summary(oid, mode, thickness, sed_dir="data/tail_seds",
     
     return output_path
 
-def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", 
-                            adhoc_fix=None, grid_csv=None, use_weights=True):
+def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", output_dir="fitted_grids", max_tstar=None,
+                            adhoc_fix=None, grid_csv=None, use_weights=True, quadratic_weights=False, spectrum_path=None,
+                            spectrum_z=0.0, spectrum_err_floor_frac=0.1, equal_group_weights=True, target_fractions=None):
     """
     Create combined summary CSV for multiple OIDs.
     """
@@ -243,7 +290,11 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
             # create individual fitted grid
             output_path = create_fitted_grid_summary(
                 oid, mode, thickness, sed_dir, output_dir, adhoc_fix=adhoc_fix, 
-                grid_csv=grid_csv, use_weights=use_weights
+                grid_csv=grid_csv, use_weights=use_weights, quadratic_weights=quadratic_weights, 
+                spectrum_path=spectrum_path, spectrum_z=spectrum_z,
+                spectrum_err_floor_frac=spectrum_err_floor_frac,
+                equal_group_weights=equal_group_weights,
+                target_fractions=target_fractions
             )
             
             # load the fitted results
@@ -268,15 +319,21 @@ def create_combined_summary(oids, mode, thickness, sed_dir="data/tail_seds", out
     else:
         output_dir = Path(output_dir) / mode / f"thick_{thick_str}"
     if adhoc_fix is not None:
-        if use_weights:
-            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+        if quadratic_weights:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}_quadratic_weights.csv"
         else:
-            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
+            if use_weights:
+                combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}.csv"
+            else:
+                combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_{adhoc_fix}_no_weights.csv"
     else:
-        if use_weights:
-            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
+        if quadratic_weights:
+            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_quadratic_weights.csv"
         else:
-            combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_no_weights.csv"
+            if use_weights:
+                combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted.csv"
+            else:
+                combined_path = output_dir / f"all_objects_{mode}_thick{thick_str}_fitted_no_weights.csv"
 
     df_combined.to_csv(combined_path, index=False)
     print(f"\nSaved combined summary: {combined_path}")
@@ -324,8 +381,40 @@ def main():
                             "Default: determined from mode and thickness via config.")
     parser.add_argument("--no-weights", action='store_true',
                        help="Disable weighting in the chi2 minimization (ignore flux uncertainties)")
+    parser.add_argument("--equal-weights", action='store_true',
+                       help="Equal weighting with err_floor_frac=0.1")
+    parser.add_argument("--quadratic-weights", action='store_true',
+                       help="Uncertainty-based weighting with err_floor_frac=0.1")
+
+    parser.add_argument("--max-tstar", type=float, default=6000.0,
+                       help="Upper limit on blackbody Tstar [K] to include in the fit "
+                            "(blackbody mode only; ignored for template mode). "
+                            "Default: 6000.0. Pass a large value (e.g. 1e6) to "
+                            "effectively disable the cutoff and consider the full "
+                            "grid's temperature range.")
+
+    # fit with spectra
+    parser.add_argument("--spectrum-path", default=None,
+                   help="Optional path to a .flm spectrum to include in the "
+                        "fit alongside photometry.")
+    parser.add_argument("--spectrum-z", type=float, default=0.0,
+                    help="Redshift for de-redshifting --spectrum-path.")
+    parser.add_argument("--spectrum-err-floor-frac", type=float, default=0.1,
+                    help="Fractional error floor per spectral bin.")
+    parser.add_argument("--no-equal-group-weights", action='store_true',
+                   help="Disable automatic W1/W2/spectrum equal-group "
+                        "rebalancing; fall back to plain per-point "
+                        "relative-error weighting (spectrum and photometry "
+                        "combine with whatever relative weight the per-point "
+                        "errors happen to produce).")
+    parser.add_argument("--spectrum-fraction", type=float, default=None,
+               help="If set (e.g. 0.1), deliberately down-weight the spectrum's "
+                    "target contribution to the scale/chi2 solve, splitting the "
+                    "remainder equally between W1 and W2. Default: equal 1/3 each.")
 
     args = parser.parse_args()
+
+    equal_group_weights = not args.no_equal_group_weights
 
     # thickness values
     if args.thickness == 'both':
@@ -350,6 +439,11 @@ def main():
     else:
         parser.print_help()
         return
+
+    target_fractions = None
+    if args.spectrum_fraction is not None:
+        remaining = (1.0 - args.spectrum_fraction) / 2.0
+        target_fractions = {"W1": remaining, "W2": remaining, "spectrum": args.spectrum_fraction}
     
     # process each mode and thickness
     for mode in modes:
@@ -360,19 +454,26 @@ def main():
             
             if len(oids) == 1:
                 # Single object
-                if args.no_weights:
+                if args.no_weights or args.equal_weights:
                     print("WARNING: Weighting is disabled for chi2 minimization (ignoring flux uncertainties)")
                     use_weights = False
                 else:
+                    if args.quadratic_weights:
+                        print("Using quadratic weighting with err_floor_frac=0.1")
                     use_weights = True
                 create_fitted_grid_summary(
                     oids[0], mode, thickness,
                     args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
-                    grid_csv=args.grid_csv, use_weights=use_weights
+                    grid_csv=args.grid_csv, use_weights=use_weights, quadratic_weights=args.quadratic_weights,
+                    max_tstar=args.max_tstar,
+                    spectrum_path=args.spectrum_path, spectrum_z=args.spectrum_z,
+                    spectrum_err_floor_frac=args.spectrum_err_floor_frac,
+                    equal_group_weights=equal_group_weights,
+                    target_fractions=target_fractions
                 )
             else:
                 # create combined summary
-                if args.no_weights:
+                if args.no_weights or args.equal_weights:
                     print("WARNING: Weighting is disabled for chi2 minimization (ignoring flux uncertainties)")
                     use_weights = False
                 else:
@@ -380,7 +481,12 @@ def main():
                 create_combined_summary(
                     oids, mode, thickness,
                     args.sed_dir, args.output_dir, adhoc_fix=args.adhoc_fix,
-                    grid_csv=args.grid_csv, use_weights=use_weights
+                    grid_csv=args.grid_csv, use_weights=use_weights, quadratic_weights=args.quadratic_weights,
+                    max_tstar=args.max_tstar,
+                    spectrum_path=args.spectrum_path, spectrum_z=args.spectrum_z,
+                    spectrum_err_floor_frac=args.spectrum_err_floor_frac,
+                    equal_group_weights=equal_group_weights,
+                    target_fractions=target_fractions
                 )
     
     print("\n" + "="*70)
